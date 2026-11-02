@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#174b3a">
+<title>Receipt &amp; Tax Tracker</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div>
+    <p class="eyebrow">PERSONAL RECORDKEEPING</p>
+    <h1>Receipt &amp; Tax Tracker</h1>
+    <p class="muted">Keep receipts, itemize taxes, and export year-end records.</p>
+  </div>
+</header>
+<main>
+<section class="panel drive-panel">
+  <div class="section-heading">
+    <div><h2>Google Drive backup</h2><p class="muted">Optional cloud backup to your personal Google Drive.</p></div>
+    <span id="drive-status" class="status">Not connected</span>
+  </div>
+  <p class="hint">Your receipts remain in this browser until you choose Back up or Restore. This app requests access to files it creates or manages, not all files in your Drive.</p>
+  <div class="actions">
+    <button id="connect-drive" type="button">Connect Google Drive</button>
+    <button id="backup-drive" type="button" class="secondary" disabled>Back up to Drive</button>
+    <button id="restore-drive" type="button" class="secondary" disabled>Restore from Drive</button>
+  </div>
+  <p id="drive-message" class="hint" role="status" aria-live="polite">No cloud backup has been made yet.</p>
+</section>
+<section class="panel">
+<h2>Add a receipt</h2>
+<p class="hint">Enter and review receipt details manually. OCR and automatic fuel-tax estimates are not included yet.</p>
+<form id="receipt-form">
+<div class="grid">
+<label>Store name<input name="store" required placeholder="Store or merchant"></label>
+<label>Purchase date<input name="date" type="date" required></label>
+<label>Category<select name="category"><option>Grocery and household</option><option>Retail purchases</option><option>Restaurant and food</option><option>Gas and vehicle</option><option>Home improvement</option><option>Work or business expenses</option><option>Utilities and bills</option><option>Medical and pharmacy</option><option>Other</option></select></label>
+<label>Receipt total ($)<input name="total" type="number" min="0" step="0.01" required placeholder="0.00"></label>
+<label>Subtotal ($)<input name="subtotal" type="number" min="0" step="0.01" placeholder="0.00"></label>
+<label>Receipt photo<input name="photo" type="file" accept="image/*" capture="environment"></label>
+</div>
+<div class="section-heading"><h3>Items (optional)</h3><button type="button" class="secondary" id="add-item">+ Add item</button></div>
+<div id="items"></div>
+<div class="section-heading"><h3>Tax lines</h3><button type="button" class="secondary" id="add-tax">+ Add tax</button></div>
+<p class="hint">Record every printed tax separately. Estimated taxes are labelled separately to help avoid double-counting.</p>
+<div id="taxes"></div>
+<div id="fuel-section" class="fuel-section hidden">
+<h3>Fuel details</h3><div class="grid">
+<label>Fuel type<select name="fuelType"><option value="">Select fuel</option><option>Gasoline</option><option>Diesel</option><option>Other fuel</option></select></label>
+<label>Gallons<input name="gallons" type="number" min="0" step="0.001" placeholder="0.000"></label>
+<label>Price per gallon ($)<input name="pricePerGallon" type="number" min="0" step="0.001" placeholder="0.000"></label>
+</div><p class="hint">Fuel-tax estimates will be added only after the applicable rate source and effective date are verified.</p>
+</div>
+<label>Notes<textarea name="notes" rows="3" placeholder="Anything you want to remember about this purchase"></textarea></label>
+<div class="actions"><button type="submit">Save receipt</button><button type="reset" class="secondary">Clear form</button></div>
+</form>
+</section>
+<section class="panel">
+<div class="section-heading"><div><h2>Saved receipts</h2><p class="muted" id="receipt-count">0 receipts</p></div><button id="export-csv" type="button">Export CSV</button></div>
+<div class="grid filters"><label>Search<input id="search" placeholder="Store, notes, category"></label><label>Year<select id="year-filter"><option value="all">All years</option></select></label></div>
+<div id="receipts-list" class="receipts-list"><p class="empty">Your saved receipts will appear here.</p></div>
+<div class="actions"><button type="button" class="secondary" id="backup-json">Download backup (JSON)</button><label class="file-button">Restore backup<input type="file" id="restore-json" accept="application/json"></label></div>
+<p class="hint warning">Cloud backup is manual in this version. Use Back up to Drive after adding or editing receipts, and periodically download a JSON backup too.</p>
+</section>
+</main>
+<footer>Personal recordkeeping tool · Not tax advice</footer>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="app.js"></script>
+</body>
+</html>
