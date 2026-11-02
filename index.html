@@ -32,7 +32,8 @@
 </section>
 <section class="panel">
 <h2>Add a receipt</h2>
-<p class="hint">Enter and review receipt details manually. OCR is not included yet. Washington fuel-tax estimates are available for 2026 gasoline and highway diesel receipts.</p>
+<p class="hint">Enter details manually or scan a receipt, then review every suggested value. Washington fuel-tax estimates are available for 2026 gasoline and highway diesel receipts.</p>
+<div class="ocr-layout"><div class="ocr-photo-side"><h3>Scan receipt photos</h3><p class="hint">Take a photo or select up to 8 images of the same receipt. Images are optimized before scanning.</p><div class="actions"><label class="file-button">Take photo<input id="ocr-camera" type="file" accept="image/*" capture="environment"></label><label class="file-button">Upload photos<input id="ocr-files" type="file" accept="image/*" multiple></label></div><div id="ocr-preview" class="ocr-preview"></div><button id="ocr-run" type="button" disabled>Scan photos and fill form</button><p id="ocr-status" class="hint" role="status">No photos selected.</p><details><summary>Recognized text (for checking)</summary><textarea id="ocr-text" rows="8" readonly></textarea></details></div><div class="ocr-form-side"><p class="hint">Scanned suggestions are highlighted. Unreadable values stay blank. Always review before saving.</p><p id="ocr-warnings" class="hint" aria-live="polite"></p>
 <form id="receipt-form">
 <div class="grid">
 <label>Store name<input name="store" required placeholder="Store or merchant"></label>
@@ -56,7 +57,7 @@
 </div>
 <label>Notes<textarea name="notes" rows="3" placeholder="Anything you want to remember about this purchase"></textarea></label>
 <div class="actions"><button type="submit">Save receipt</button><button type="reset" class="secondary">Clear form</button></div>
-</form>
+</form></div></div>
 </section>
 <section class="panel">
 <h2>Yearly tax reports</h2>
@@ -95,6 +96,8 @@
 </main>
 <footer>Personal recordkeeping tool · Not tax advice</footer>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
 <script src="app.js"></script>
+<script src="ocr.js" defer></script>
 </body>
 </html>

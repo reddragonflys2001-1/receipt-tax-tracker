@@ -186,6 +186,7 @@ form.addEventListener('submit', event => {
     pricePerGallon: data.get('pricePerGallon') === '' ? '' : Number(data.get('pricePerGallon')),
     notes: String(data.get('notes') || '').trim(),
     photo: pendingPhoto || oldRecord?.photo || '',
+    photos: window.pendingOcrPhotos?.length ? [...window.pendingOcrPhotos] : (oldRecord?.photos || []),
     createdAt: oldRecord?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -197,6 +198,7 @@ form.addEventListener('submit', event => {
   itemsBox.innerHTML = '';
   taxesBox.innerHTML = '';
   pendingPhoto = '';
+  if (window.resetOcrPhotos) window.resetOcrPhotos();
   form.querySelector('[type="submit"]').textContent = 'Save receipt';
   toggleFuelSection();
 });
@@ -205,6 +207,7 @@ form.addEventListener('reset', () => {
     itemsBox.innerHTML = '';
     taxesBox.innerHTML = '';
     pendingPhoto = '';
+    if (window.resetOcrPhotos) window.resetOcrPhotos();
     editId = null;
     form.querySelector('[type="submit"]').textContent = 'Save receipt';
     toggleFuelSection();
