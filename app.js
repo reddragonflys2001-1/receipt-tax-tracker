@@ -54,6 +54,65 @@ function setConnected(connected) {
   restoreButton.disabled = !connected;
 }
 const TAX_TYPES = ['State sales tax','Local sales tax','Special/district tax','Product-specific tax','Other tax'];
+// Published Washington DOL gasoline and highway diesel rates, through Dec 2026.
+// Do not guess rates outside supported dates or for other fuels.
+const FUEL_RATE_SOURCE = 'https://dol.wa.gov/vehicles-and-boats/prorate-and-fuel-tax/fuel-tax/fuel-licenses/fuel-licenses-motor-vehicle-fuel-or-special-fuel';
+const FUEL_RATES = [
+  {start:'2026-01-01', end:'2026-06-30', Gasoline:{state:0.554,federal:0.184}, Diesel:{state:0.584,federal:0.244}},
+  {start:'2026-07-01', end:'2026-12-31', Gasoline:{state:0.565,federal:0.184}, Diesel:{state:0.595,federal:0.244}}
+];
+const FUEL_TAX_NAMES = ['Washington State Fuel Tax', 'Federal Fuel Tax'];
+const roundCents = n => Math.round((n + Number.EPSILON) * 100) / 100;
+function applicableFuelRates() {
+  if (form.elements.category.value !== 'Gas and vehicle') return null;
+  const date = form.elements.date.value;
+  const fuel = form.elements.fuelType.value;
+  const gallons = Number(form.elements.gallons.value);
+  if (!date || !['Gasoline','Diesel'].includes(fuel) || !Number.isFinite(gallons) || gallons <= 0) return null;
+  const period = FUEL_RATES.find(p => date >= p.start && date <= p.end);
+  return period ? {period, fuel, gallons, ...period[fuel]} : null;
+}
+function fuelTaxRow(name) {
+  return [...taxesBox.querySelectorAll('.tax-row')].find(row => row.dataset.autoFuelTax === name);
+}
+function refreshFuelEstimates() {
+  const notice = document.querySelector('#fuel-estimate-status');
+  const rates = applicableFuelRates();
+  if (!rates) {
+    notice.textContent = form.elements.category.value !== 'Gas and vehicle' ? '' : 'Choose a 2026 purchase date, gasoline or diesel, and gallons greater than zero to calculate. Rates for other dates or fuels are not available in this version.';
+    // Remove only auto-created rows, never user-entered rows.
+    for (const row of taxesBox.querySelectorAll('.tax-row[data-auto-fuel-tax]')) row.remove();
+    return;
+  }
+  const definitions = [
+    {name:FUEL_TAX_NAMES[0], amount:roundCents(rates.gallons * rates.state), jurisdiction:'Washington', rate:rates.state},
+    {name:FUEL_TAX_NAMES[1], amount:roundCents(rates.gallons * rates.federal), jurisdiction:'United States', rate:rates.federal}
+  ];
+  for (const item of definitions) {
+    let row = fuelTaxRow(item.name);
+    if (!row) {
+      // If an existing receipt has a matching saved line, preserve it instead of duplicating it.
+      row = [...taxesBox.querySelectorAll('.tax-row')].find(r => r.querySelector('[data-key="name"]').value === item.name && r.querySelector('[data-key="source"]').value === 'Calculated estimate');
+    }
+    if (!row) {
+      addTax({name:item.name, amount:item.amount, taxType:'Other tax', jurisdiction:item.jurisdiction, source:'Calculated estimate'});
+      row = taxesBox.lastElementChild;
+    } else if (row.dataset.autoFuelTax === item.name && row.dataset.userEdited !== 'true') {
+      row.querySelector('[data-key="amount"]').value = item.amount.toFixed(2);
+    }
+    row.dataset.autoFuelTax = item.name;
+    row.querySelector('[data-key="name"]').value = item.name;
+    row.querySelector('[data-key="taxType"]').value = 'Other tax';
+    row.querySelector('[data-key="jurisdiction"]').value = item.jurisdiction;
+    row.querySelector('[data-key="source"]').value = 'Calculated estimate';
+    row.dataset.rate = String(item.rate);
+    row.dataset.ratePeriod = `${rates.period.start} to ${rates.period.end}`;
+  }
+  notice.textContent = `Estimated taxes included in the pump price. Washington $${rates.state.toFixed(3)}/gal; federal $${rates.federal.toFixed(3)}/gal (${rates.period.start} through ${rates.period.end}). Review/edit amounts before saving. Rates: Washington DOL.`;
+}
+for (const name of ['date','fuelType','gallons']) form.elements[name].addEventListener('change', refreshFuelEstimates);
+form.elements.gallons.addEventListener('input', refreshFuelEstimates);
+
 function addTax(data = {}) {
   const row = document.createElement('div');
   row.className = 'line-row tax-row';
@@ -67,6 +126,7 @@ function addTax(data = {}) {
     <button type="button" class="secondary">Remove</button>`;
   row.querySelector('button').addEventListener('click', () => row.remove());
   taxesBox.append(row);
+  row.querySelector('[data-key="amount"]').addEventListener('input', () => { if (row.dataset.autoFuelTax) row.dataset.userEdited = 'true'; });
 }
 function addItem(data = {}) {
   const row = document.createElement('div');
@@ -87,6 +147,7 @@ function getRows(container, className) {
 }
 function toggleFuelSection() {
   document.querySelector('#fuel-section').classList.toggle('hidden', form.elements.category.value !== 'Gas and vehicle');
+  refreshFuelEstimates();
 }
 form.elements.category.addEventListener('change', toggleFuelSection);
 document.querySelector('#add-tax').addEventListener('click', () => addTax());
@@ -115,9 +176,11 @@ form.addEventListener('submit', event => {
     items: getRows(itemsBox, 'item-row').map(row => ({
       name: row.name, qty: Number(row.qty || 1), price: row.price === '' ? '' : Number(row.price)
     })),
-    taxes: getRows(taxesBox, 'tax-row').map(row => ({
-      name: row.name, amount: Number(row.amount || 0), taxType: row.taxType, jurisdiction: row.jurisdiction.trim(), source: row.source
-    })),
+    taxes: [...taxesBox.querySelectorAll('.tax-row')].map(el => {
+      const row = Object.fromEntries([...el.querySelectorAll('[data-key]')].map(input => [input.dataset.key, input.value]));
+      return {name:row.name, amount:Number(row.amount || 0), taxType:row.taxType, jurisdiction:row.jurisdiction.trim(), source:row.source,
+        ...(el.dataset.autoFuelTax ? {fuelTaxRatePerGallon:Number(el.dataset.rate), fuelTaxRatePeriod:el.dataset.ratePeriod, fuelTaxRateSource:FUEL_RATE_SOURCE} : {})};
+    }),
     fuelType: data.get('fuelType') || '',
     gallons: data.get('gallons') === '' ? '' : Number(data.get('gallons')),
     pricePerGallon: data.get('pricePerGallon') === '' ? '' : Number(data.get('pricePerGallon')),

@@ -32,7 +32,7 @@
 </section>
 <section class="panel">
 <h2>Add a receipt</h2>
-<p class="hint">Enter and review receipt details manually. OCR and automatic fuel-tax estimates are not included yet.</p>
+<p class="hint">Enter and review receipt details manually. OCR is not included yet. Washington fuel-tax estimates are available for 2026 gasoline and highway diesel receipts.</p>
 <form id="receipt-form">
 <div class="grid">
 <label>Store name<input name="store" required placeholder="Store or merchant"></label>
@@ -52,7 +52,7 @@
 <label>Fuel type<select name="fuelType"><option value="">Select fuel</option><option>Gasoline</option><option>Diesel</option><option>Other fuel</option></select></label>
 <label>Gallons<input name="gallons" type="number" min="0" step="0.001" placeholder="0.000"></label>
 <label>Price per gallon ($)<input name="pricePerGallon" type="number" min="0" step="0.001" placeholder="0.000"></label>
-</div><p class="hint">Fuel-tax estimates will be added only after the applicable rate source and effective date are verified.</p>
+</div><p id="fuel-estimate-status" class="hint" aria-live="polite"></p><p class="hint">For 2026 Washington gasoline and standard highway diesel only. Estimated state and federal taxes are included in the pump price and do not increase your receipt total. <a href="https://dol.wa.gov/vehicles-and-boats/prorate-and-fuel-tax/fuel-tax/fuel-licenses/fuel-licenses-motor-vehicle-fuel-or-special-fuel" target="_blank" rel="noopener noreferrer">Rate source: Washington DOL</a>.</p>
 </div>
 <label>Notes<textarea name="notes" rows="3" placeholder="Anything you want to remember about this purchase"></textarea></label>
 <div class="actions"><button type="submit">Save receipt</button><button type="reset" class="secondary">Clear form</button></div>
