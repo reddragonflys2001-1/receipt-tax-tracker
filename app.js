@@ -53,7 +53,7 @@ function setConnected(connected) {
   backupButton.disabled = !connected;
   restoreButton.disabled = !connected;
 }
-const TAX_TYPES = ['State sales tax','Local sales tax','Special/district tax','Product-specific tax','Other tax'];
+const TAX_TYPES = ['State sales tax','Local sales tax','Special/district tax','Product-specific tax','Washington State Fuel Tax','Federal Fuel Tax','Other tax'];
 // Published Washington DOL gasoline and highway diesel rates, through Dec 2026.
 // Do not guess rates outside supported dates or for other fuels.
 const FUEL_RATE_SOURCE = 'https://dol.wa.gov/vehicles-and-boats/prorate-and-fuel-tax/fuel-tax/fuel-licenses/fuel-licenses-motor-vehicle-fuel-or-special-fuel';
@@ -95,14 +95,14 @@ function refreshFuelEstimates() {
       row = [...taxesBox.querySelectorAll('.tax-row')].find(r => r.querySelector('[data-key="name"]').value === item.name && r.querySelector('[data-key="source"]').value === 'Calculated estimate');
     }
     if (!row) {
-      addTax({name:item.name, amount:item.amount, taxType:'Other tax', jurisdiction:item.jurisdiction, source:'Calculated estimate'});
+      addTax({name:item.name, amount:item.amount, taxType:item.name, jurisdiction:item.jurisdiction, source:'Calculated estimate'});
       row = taxesBox.lastElementChild;
     } else if (row.dataset.autoFuelTax === item.name && row.dataset.userEdited !== 'true') {
       row.querySelector('[data-key="amount"]').value = item.amount.toFixed(2);
     }
     row.dataset.autoFuelTax = item.name;
     row.querySelector('[data-key="name"]').value = item.name;
-    row.querySelector('[data-key="taxType"]').value = 'Other tax';
+    row.querySelector('[data-key="taxType"]').value = item.name;
     row.querySelector('[data-key="jurisdiction"]').value = item.jurisdiction;
     row.querySelector('[data-key="source"]').value = 'Calculated estimate';
     row.dataset.rate = String(item.rate);
@@ -296,7 +296,7 @@ function renderReports() {
     if (!Number.isFinite(amount)) return;
     const isEstimate = t.source === 'Calculated estimate';
     if (isEstimate) estimated += amount; else printed += amount;
-    accumulate(byType, t.taxType || 'Other tax', amount, isEstimate);
+    accumulate(byType, FUEL_TAX_NAMES.includes(t.name) && t.source === 'Calculated estimate' ? t.name : (t.taxType || 'Other tax'), amount, isEstimate);
     accumulate(byJurisdiction, t.jurisdiction?.trim() || 'Unspecified jurisdiction', amount, isEstimate);
   }));
   document.querySelector('#report-summary').textContent = `${selected.length} receipts · Spending $${money(spending)} · Printed taxes $${money(printed)} · Estimated taxes $${money(estimated)}`;
@@ -306,6 +306,29 @@ function renderReports() {
   }
   document.querySelector('#report-types').innerHTML = table(byType);
   document.querySelector('#report-jurisdictions').innerHTML = table(byJurisdiction);
+  const fuel = {Gasoline:{gallons:0, state:0, federal:0, count:0}, Diesel:{gallons:0, state:0, federal:0, count:0}};
+  selected.filter(r => r.category === 'Gas and vehicle' && Object.hasOwn(fuel, r.fuelType)).forEach(r => {
+    const entry = fuel[r.fuelType];
+    const gallons = Number(r.gallons);
+    if (Number.isFinite(gallons) && gallons > 0) entry.gallons += gallons;
+    entry.count++;
+    for (const t of r.taxes || []) {
+      if (t.source !== 'Calculated estimate') continue;
+      const amount = Number(t.amount);
+      if (!Number.isFinite(amount)) continue;
+      if (t.name === FUEL_TAX_NAMES[0]) entry.state += amount;
+      if (t.name === FUEL_TAX_NAMES[1]) entry.federal += amount;
+    }
+  });
+  const fuelRows = Object.entries(fuel).filter(([,v]) => v.count);
+  const fuelSummary = document.querySelector('#report-fuel-summary');
+  if (!fuelRows.length) fuelSummary.innerHTML = '<p class="empty">No gasoline or diesel receipts for this period.</p>';
+  else {
+    const totals = fuelRows.reduce((t,[,v]) => ({gallons:t.gallons+v.gallons,state:t.state+v.state,federal:t.federal+v.federal}), {gallons:0,state:0,federal:0});
+    const tr = (name,v) => `<tr><td>${escapeHtml(name)}</td><td>${v.gallons.toFixed(3)}</td><td>$${money(v.state)}</td><td>$${money(v.federal)}</td><td>$${money(v.state+v.federal)}</td></tr>`;
+    fuelSummary.innerHTML = `<div style="overflow-x:auto"><table class="report-table"><thead><tr><th>Fuel</th><th>Gallons</th><th>WA state est.</th><th>Federal est.</th><th>Total est.</th></tr></thead><tbody>${fuelRows.map(([name,v]) => tr(name,v)).join('')}${tr('Total',totals)}</tbody></table></div>`;
+  }
+
 }
 document.querySelector('#report-year').addEventListener('change', renderReports);
 document.querySelector('#export-csv').addEventListener('click', () => {
