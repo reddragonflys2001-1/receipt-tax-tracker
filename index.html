@@ -78,6 +78,13 @@
 <div class="section-heading"><div><h3>Receipts in selection</h3><p id="monthly-filter-label" class="hint"></p></div><button id="monthly-clear" type="button" class="secondary">Clear selection</button></div>
 <div id="monthly-receipts"></div>
 </section>
+<section class="panel" id="csv-export-center">
+<h2>CSV Export Center</h2>
+<p class="hint">Choose an inclusive purchase-date range. Each download uses the same filtered receipts. CSV exports contain receipt details but not the original receipt images; keep JSON/Google Drive backups for restoration.</p>
+<div class="grid filters"><label>Start date<input id="csv-start" type="date" value="2026-01-01"></label><label>End date<input id="csv-end" type="date" value="2026-12-31"></label></div>
+<p class="hint" id="csv-export-status" aria-live="polite"></p>
+<div class="actions"><button type="button" class="secondary" data-csv-report="receipts">Receipts CSV</button><button type="button" class="secondary" data-csv-report="monthly">Monthly spending CSV</button><button type="button" class="secondary" data-csv-report="yearly">Yearly taxes CSV</button><button type="button" class="secondary" data-csv-report="fuel">Fuel tax CSV</button><button type="button" id="csv-export-all">Download all as ZIP</button></div>
+</section>
 <section class="panel">
 <div class="section-heading"><div><h2>Saved receipts</h2><p class="muted" id="receipt-count">0 receipts</p></div><button id="export-csv" type="button">Export CSV</button></div>
 <div class="grid filters"><label>Search<input id="search" placeholder="Store, notes, category"></label><label>Year<select id="year-filter"><option value="all">All years</option></select></label></div>

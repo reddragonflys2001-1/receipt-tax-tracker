@@ -394,6 +394,107 @@ document.querySelector('#export-csv').addEventListener('click', () => {
   const csv = [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n');
   downloadBlob(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }), `receipt-tax-tracker-${new Date().getFullYear()}.csv`);
 });
+
+// CSV Export Center: reports are calculated from saved records without changing them.
+const csvStart = document.querySelector('#csv-start');
+const csvEnd = document.querySelector('#csv-end');
+const csvStatus = document.querySelector('#csv-export-status');
+function csvRange() {
+  const start = csvStart.value, end = csvEnd.value;
+  if (!start || !end || start > end) throw new Error('Choose a valid start date on or before the end date.');
+  return {start, end, selected:receipts.filter(r => typeof r.date === 'string' && r.date >= start && r.date <= end)};
+}
+function taxTotals(r) {
+  return (r.taxes || []).reduce((sum,t) => {
+    const amount = Number(t.amount);
+    if (Number.isFinite(amount)) sum[t.source === 'Calculated estimate' ? 'estimated' : 'printed'] += amount;
+    return sum;
+  }, {printed:0,estimated:0});
+}
+function csvEncode(rows) { return '\ufeff' + rows.map(row => row.map(csvCell).join(',')).join('\r\n'); }
+function reportFiles(selected, rangeLabel) {
+  const files = {};
+  const prefix = `receipt-tax-tracker-${rangeLabel}`;
+  const receiptHeaders = ['Store name','Purchase date','Category','Receipt total','Subtotal',
+    ...[1,2,3].flatMap(i=>[`Tax ${i} name`,`Tax ${i} amount`,`Tax ${i} type`,`Tax ${i} jurisdiction`,`Tax ${i} source`]),
+    'All tax lines JSON','Items JSON','Fuel type','Gallons','Price per gallon','Notes','Receipt photo included'];
+  const receiptRows = selected.map(r => [r.store,r.date,r.category,r.total,r.subtotal,
+    ...[0,1,2].flatMap(i=>{const t=r.taxes?.[i];return [t?.name||'',t?.amount??'',t?.taxType||(t?'Other tax':''),t?.jurisdiction||'',t?.source||''];}),
+    JSON.stringify(r.taxes||[]),JSON.stringify(r.items||[]),r.fuelType,r.gallons,r.pricePerGallon,r.notes,r.photo?'yes':'no']);
+  files.receipts = {name:`${prefix}-receipts.csv`, content:csvEncode([receiptHeaders,...receiptRows])};
+  const monthly = new Map();
+  for (const r of selected) {
+    const key = r.date.slice(0,7), category = r.category || 'Uncategorized';
+    const groupKey = `${key}\u0000${category}`;
+    const row = monthly.get(groupKey) || {month:key,category,count:0,spending:0,printed:0,estimated:0};
+    const t=taxTotals(r); row.count++;row.spending+=Number(r.total)||0;row.printed+=t.printed;row.estimated+=t.estimated;monthly.set(groupKey,row);
+  }
+  files.monthly={name:`${prefix}-monthly-spending.csv`,content:csvEncode([['Month','Category','Receipt count','Spending','Printed taxes','Estimated taxes'],
+    ...[...monthly.values()].sort((a,b)=>a.month.localeCompare(b.month)||a.category.localeCompare(b.category)).map(r=>[r.month,r.category,r.count,roundCents(r.spending),roundCents(r.printed),roundCents(r.estimated)])])};
+  const taxGroups = new Map();
+  for (const r of selected) for (const t of r.taxes||[]) {
+    const amount=Number(t.amount);if(!Number.isFinite(amount))continue;
+    const type=FUEL_TAX_NAMES.includes(t.name)&&t.source==='Calculated estimate'?t.name:(t.taxType||'Other tax');
+    const jurisdiction=t.jurisdiction?.trim()||'Unspecified jurisdiction';
+    const key=`${r.date.slice(0,4)}\u0000${type}\u0000${jurisdiction}`;
+    const row=taxGroups.get(key)||{year:r.date.slice(0,4),type,jurisdiction,printed:0,estimated:0};
+    row[t.source==='Calculated estimate'?'estimated':'printed']+=amount;taxGroups.set(key,row);
+  }
+  files.yearly={name:`${prefix}-yearly-taxes.csv`,content:csvEncode([['Year','Tax type','Jurisdiction','Printed taxes','Estimated taxes'],
+    ...[...taxGroups.values()].sort((a,b)=>a.year.localeCompare(b.year)||a.type.localeCompare(b.type)||a.jurisdiction.localeCompare(b.jurisdiction)).map(r=>[r.year,r.type,r.jurisdiction,roundCents(r.printed),roundCents(r.estimated)])])};
+  const fuelGroups=new Map();
+  for(const r of selected) {
+    if(r.category!=='Gas and vehicle'||!['Gasoline','Diesel'].includes(r.fuelType))continue;
+    const key=`${r.date.slice(0,4)}\u0000${r.fuelType}`;
+    const row=fuelGroups.get(key)||{year:r.date.slice(0,4),fuel:r.fuelType,count:0,gallons:0,state:0,federal:0};
+    row.count++;const gallons=Number(r.gallons);if(Number.isFinite(gallons)&&gallons>0)row.gallons+=gallons;
+    for(const t of r.taxes||[])if(t.source==='Calculated estimate') {
+      const amount=Number(t.amount);if(!Number.isFinite(amount))continue;
+      if(t.name===FUEL_TAX_NAMES[0])row.state+=amount;
+      if(t.name===FUEL_TAX_NAMES[1])row.federal+=amount;
+    }
+    fuelGroups.set(key,row);
+  }
+  files.fuel={name:`${prefix}-fuel-taxes.csv`,content:csvEncode([['Year','Fuel type','Receipt count','Gallons','Washington state estimated tax','Federal estimated tax','Total estimated fuel tax'],
+    ...[...fuelGroups.values()].sort((a,b)=>a.year.localeCompare(b.year)||a.fuel.localeCompare(b.fuel)).map(r=>[r.year,r.fuel,r.count,Number(r.gallons.toFixed(3)),roundCents(r.state),roundCents(r.federal),roundCents(r.state+r.federal)])])};
+  return files;
+}
+function prepareCsv() {
+  const {start,end,selected}=csvRange();
+  csvStatus.textContent=`${selected.length} receipt(s) selected · ${start} through ${end}`;
+  return {files:reportFiles(selected,`${start}-to-${end}`),start,end};
+}
+function downloadCsvReport(kind) {
+  try { const {files}=prepareCsv();const f=files[kind];downloadBlob(new Blob([f.content],{type:'text/csv;charset=utf-8'}),f.name); }
+  catch(error){csvStatus.textContent=error.message;}
+}
+document.querySelectorAll('[data-csv-report]').forEach(b=>b.addEventListener('click',()=>downloadCsvReport(b.dataset.csvReport)));
+for(const el of [csvStart,csvEnd])el.addEventListener('change',()=>{try{const {selected,start,end}=csvRange();csvStatus.textContent=`${selected.length} receipt(s) selected · ${start} through ${end}`;}catch(error){csvStatus.textContent=error.message;}});
+// Minimal standards-compliant ZIP writer (stored entries, UTF-8 names, CRC-32); no external CDN required.
+function makeZip(files) {
+  const encoder=new TextEncoder(), chunks=[], central=[];
+  let offset=0;
+  const table=Array.from({length:256},(_,n)=>{let c=n;for(let i=0;i<8;i++)c=(c&1)?0xedb88320^(c>>>1):c>>>1;return c>>>0;});
+  const crc32=bytes=>{let c=0xffffffff;for(const b of bytes)c=table[(c^b)&255]^(c>>>8);return(c^0xffffffff)>>>0;};
+  const u16=(view,at,n)=>view.setUint16(at,n,true),u32=(view,at,n)=>view.setUint32(at,n>>>0,true);
+  for(const f of Object.values(files)) {
+    const name=encoder.encode(f.name), data=encoder.encode(f.content), crc=crc32(data);
+    const local=new Uint8Array(30+name.length), lv=new DataView(local.buffer);
+    u32(lv,0,0x04034b50);u16(lv,4,20);u16(lv,6,0x800);u32(lv,14,crc);u32(lv,18,data.length);u32(lv,22,data.length);u16(lv,26,name.length);local.set(name,30);
+    chunks.push(local,data);
+    const record=new Uint8Array(46+name.length),rv=new DataView(record.buffer);
+    u32(rv,0,0x02014b50);u16(rv,4,20);u16(rv,6,20);u16(rv,8,0x800);u32(rv,16,crc);u32(rv,20,data.length);u32(rv,24,data.length);u16(rv,28,name.length);u32(rv,42,offset);record.set(name,46);central.push(record);
+    offset+=local.length+data.length;
+  }
+  const centralSize=central.reduce((n,b)=>n+b.length,0),end=new Uint8Array(22),ev=new DataView(end.buffer);
+  u32(ev,0,0x06054b50);u16(ev,8,central.length);u16(ev,10,central.length);u32(ev,12,centralSize);u32(ev,16,offset);
+  return new Blob([...chunks,...central,end],{type:'application/zip'});
+}
+document.querySelector('#csv-export-all').addEventListener('click',()=>{
+  try {const {files,start,end}=prepareCsv();downloadBlob(makeZip(files),`receipt-tax-tracker-${start}-to-${end}-all-reports.zip`);}
+  catch(error){csvStatus.textContent=error.message;}
+});
+
 document.querySelector('#backup-json').addEventListener('click', () => {
   const backup = { schemaVersion: 1, exportedAt: new Date().toISOString(), receipts };
   downloadBlob(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }), `receipt-tax-backup-${new Date().toISOString().slice(0,10)}.json`);
