@@ -224,6 +224,7 @@ function renderReceipts() {
     [r.store, r.notes, r.category].join(' ').toLowerCase().includes(searchTerm)
   );
   renderReports();
+  renderMonthlyReports();
   const total = filtered.reduce((sum, r) => sum + Number(r.total || 0), 0);
   document.querySelector('#receipt-count').textContent = `${filtered.length} receipt${filtered.length === 1 ? '' : 's'} · Total $${money(total)}`;
   if (!filtered.length) {
@@ -330,6 +331,56 @@ function renderReports() {
   }
 
 }
+
+// Monthly reporting uses existing receipt data without modifying stored records.
+let monthlySelection = {kind:null, value:null};
+const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function renderMonthlyReports() {
+  const yearSelect = document.querySelector('#monthly-year');
+  const priorYear = yearSelect.value;
+  const years = [...new Set(receipts.map(r => String(r.date || '').slice(0,4)).filter(y => /^\d{4}$/.test(y)))].sort().reverse();
+  yearSelect.innerHTML = '<option value="all">All years</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
+  yearSelect.value = years.includes(priorYear) ? priorYear : 'all';
+  const selected = receipts.filter(r => yearSelect.value === 'all' || String(r.date || '').startsWith(yearSelect.value));
+  const totals = Array.from({length:12}, (_,i) => ({month:i, spending:0, printed:0, estimated:0, count:0}));
+  const categories = new Map();
+  const taxAmounts = r => (r.taxes || []).reduce((v,t) => {
+    const amount = Number(t.amount || 0);
+    if (Number.isFinite(amount)) v[t.source === 'Calculated estimate' ? 'estimated' : 'printed'] += amount;
+    return v;
+  }, {printed:0, estimated:0});
+  selected.forEach(r => {
+    const amount = Number(r.total || 0);
+    const spend = Number.isFinite(amount) ? amount : 0;
+    const category = String(r.category || 'Other');
+    const taxes = taxAmounts(r);
+    categories.set(category, (categories.get(category) || 0) + spend);
+    const month = Number(String(r.date || '').slice(5,7)) - 1;
+    if (month >= 0 && month < 12) {
+      const row = totals[month]; row.spending += spend; row.printed += taxes.printed;
+      row.estimated += taxes.estimated; row.count++;
+    }
+  });
+  const spending = selected.reduce((sum,r) => sum + (Number(r.total) || 0),0);
+  const printed = selected.reduce((sum,r) => sum + taxAmounts(r).printed,0);
+  const estimated = selected.reduce((sum,r) => sum + taxAmounts(r).estimated,0);
+  document.querySelector('#monthly-summary').textContent = `${selected.length} receipts · Spending $${money(spending)} · Printed taxes $${money(printed)} · Estimated taxes $${money(estimated)}`;
+  const max = Math.max(1,...totals.map(r => r.spending));
+  document.querySelector('#monthly-bars').innerHTML = totals.map(r => `<button type="button" class="monthly-bar${monthlySelection.kind === 'month' && monthlySelection.value === r.month ? ' selected' : ''}" data-month="${r.month}" aria-pressed="${monthlySelection.kind === 'month' && monthlySelection.value === r.month}"><span class="monthly-bar-value">$${money(r.spending)}</span><span class="monthly-bar-track"><span class="monthly-bar-fill" style="height:${Math.max(0,Math.min(100,r.spending/max*100))}%"></span></span><span>${monthNames[r.month]}</span></button>`).join('');
+  document.querySelector('#monthly-categories').innerHTML = [...categories].sort((a,b) => b[1]-a[1]).map(([name,value]) => `<button type="button" class="monthly-category${monthlySelection.kind === 'category' && monthlySelection.value === name ? ' selected' : ''}" data-category="${escapeHtml(name)}" aria-pressed="${monthlySelection.kind === 'category' && monthlySelection.value === name}"><span>${escapeHtml(name)}</span><span class="monthly-category-track"><span style="width:${Math.max(0,Math.min(100,value/Math.max(1,spending)*100))}%"></span></span><strong>$${money(value)}</strong></button>`).join('') || '<p class="empty">No categories yet.</p>';
+  document.querySelector('#monthly-table').innerHTML = `<div style="overflow-x:auto"><table class="report-table"><thead><tr><th>Month</th><th>Receipts</th><th>Spending</th><th>Printed tax</th><th>Estimated tax</th><th>YTD spending</th></tr></thead><tbody>${totals.map((r,i) => `<tr><td>${monthNames[i]}</td><td>${r.count}</td><td>$${money(r.spending)}</td><td>$${money(r.printed)}</td><td>$${money(r.estimated)}</td><td>$${money(totals.slice(0,i+1).reduce((sum,m) => sum+m.spending,0))}</td></tr>`).join('')}</tbody></table></div>`;
+  let filtered = selected;
+  if (monthlySelection.kind === 'month') filtered = selected.filter(r => Number(String(r.date || '').slice(5,7))-1 === monthlySelection.value);
+  if (monthlySelection.kind === 'category') filtered = selected.filter(r => String(r.category || 'Other') === monthlySelection.value);
+  const label = monthlySelection.kind === 'month' ? monthNames[monthlySelection.value] : monthlySelection.kind === 'category' ? monthlySelection.value : 'All receipts';
+  document.querySelector('#monthly-filter-label').textContent = `${label} · ${filtered.length} receipt(s) · $${money(filtered.reduce((sum,r) => sum+(Number(r.total)||0),0))}`;
+  document.querySelector('#monthly-receipts').innerHTML = filtered.length ? `<div style="overflow-x:auto"><table class="report-table"><thead><tr><th>Date</th><th>Store</th><th>Category</th><th>Amount</th><th>Printed tax</th><th>Estimated tax</th></tr></thead><tbody>${[...filtered].sort((a,b) => String(b.date || '').localeCompare(String(a.date || ''))).map(r => { const t=taxAmounts(r);return `<tr><td>${escapeHtml(r.date)}</td><td>${escapeHtml(r.store)}</td><td>${escapeHtml(r.category)}</td><td>$${money(r.total)}</td><td>$${money(t.printed)}</td><td>$${money(t.estimated)}</td></tr>`; }).join('')}</tbody></table></div>` : '<p class="empty">No receipts for this selection.</p>';
+  document.querySelectorAll('#monthly-bars [data-month]').forEach(button => button.addEventListener('click', () => {const value=Number(button.dataset.month);monthlySelection=monthlySelection.kind==='month'&&monthlySelection.value===value?{kind:null,value:null}:{kind:'month',value};renderMonthlyReports();}));
+  document.querySelectorAll('#monthly-categories [data-category]').forEach(button => button.addEventListener('click', () => {const value=button.dataset.category;monthlySelection=monthlySelection.kind==='category'&&monthlySelection.value===value?{kind:null,value:null}:{kind:'category',value};renderMonthlyReports();}));
+}
+document.querySelector('#monthly-year').addEventListener('change', () => { monthlySelection={kind:null,value:null};renderMonthlyReports(); });
+document.querySelector('#monthly-clear').addEventListener('click', () => {monthlySelection={kind:null,value:null};renderMonthlyReports();});
+
 document.querySelector('#report-year').addEventListener('change', renderReports);
 document.querySelector('#export-csv').addEventListener('click', () => {
   const headers = ['Store name','Purchase date','Category','Receipt total','Subtotal',

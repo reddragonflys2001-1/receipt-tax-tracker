@@ -67,6 +67,17 @@
 <h3>Taxes by jurisdiction</h3><div id="report-jurisdictions"></div>
 <h3>Fuel tax summary</h3><p class="hint">Gallons and saved state/federal estimated fuel taxes by fuel type. These taxes are already included in pump prices, not added to spending.</p><div id="report-fuel-summary"></div>
 </section>
+<section class="panel" id="monthly-panel">
+<h2>Monthly spending reports</h2>
+<p class="hint">Explore monthly spending and category totals. Select a bar or category to view the receipts behind it. Printed and estimated taxes remain separate and are not added to spending.</p>
+<label>Report year <select id="monthly-year"><option value="all">All years</option></select></label>
+<p id="monthly-summary" class="hint"></p>
+<h3>Monthly spending chart</h3><div id="monthly-bars" class="monthly-bars" aria-label="Interactive monthly spending bar chart"></div>
+<h3>Spending by category</h3><div id="monthly-categories" class="monthly-categories"></div>
+<h3>Monthly totals</h3><div id="monthly-table"></div>
+<div class="section-heading"><div><h3>Receipts in selection</h3><p id="monthly-filter-label" class="hint"></p></div><button id="monthly-clear" type="button" class="secondary">Clear selection</button></div>
+<div id="monthly-receipts"></div>
+</section>
 <section class="panel">
 <div class="section-heading"><div><h2>Saved receipts</h2><p class="muted" id="receipt-count">0 receipts</p></div><button id="export-csv" type="button">Export CSV</button></div>
 <div class="grid filters"><label>Search<input id="search" placeholder="Store, notes, category"></label><label>Year<select id="year-filter"><option value="all">All years</option></select></label></div>

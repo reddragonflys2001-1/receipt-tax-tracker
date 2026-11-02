@@ -27,3 +27,17 @@ footer{text-align:center;color:var(--muted);padding:20px;font-size:.85rem}
 @media(max-width:650px){.grid{grid-template-columns:1fr}.line-row,.tax-row{grid-template-columns:1fr 1fr}.line-row label:first-child,.tax-row label:first-child{grid-column:1/-1}.line-row button,.tax-row button{grid-column:1/-1}.section-heading{align-items:flex-start;flex-wrap:wrap}.panel{border-radius:12px}header{padding:24px 18px}}
 
 .report-table {width:100%;border-collapse:collapse;margin:12px 0 20px;} .report-table th,.report-table td {text-align:left;padding:10px;border-bottom:1px solid #d8e2dc;} .report-table th {background:#eef5f0;}
+
+/* Monthly interactive reports */
+.monthly-bars{display:grid;grid-template-columns:repeat(12,minmax(45px,1fr));gap:7px;overflow-x:auto;padding:12px 0 16px}
+.monthly-bar{display:flex;flex-direction:column;align-items:center;gap:6px;padding:6px 2px;background:transparent;border:2px solid transparent;border-radius:9px;cursor:pointer;color:inherit;font:inherit;min-width:45px}
+.monthly-bar:hover,.monthly-bar.selected,.monthly-category:hover,.monthly-category.selected{border-color:#174b3a;background:#eaf3ee}
+.monthly-bar-value{font-size:10px;white-space:nowrap}
+.monthly-bar-track{height:135px;width:65%;min-width:18px;display:flex;align-items:flex-end;background:#edf2ef;border-radius:5px;overflow:hidden}
+.monthly-bar-fill{width:100%;background:#287c60;border-radius:4px 4px 0 0}
+.monthly-categories{display:grid;gap:7px}
+.monthly-category{display:grid;grid-template-columns:minmax(115px,1fr) minmax(70px,2fr) 85px;align-items:center;gap:12px;padding:10px;border:2px solid transparent;border-radius:8px;background:#f6f8f6;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.monthly-category-track{height:13px;background:#e3eae5;border-radius:10px;overflow:hidden}
+.monthly-category-track span{height:100%;display:block;background:#287c60}
+.monthly-category strong{text-align:right}
+@media(max-width:600px){.monthly-bars{grid-template-columns:repeat(12,minmax(52px,1fr))}.monthly-category{grid-template-columns:minmax(100px,1fr) 1fr 75px;gap:5px;font-size:12px}}
