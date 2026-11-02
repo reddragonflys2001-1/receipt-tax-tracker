@@ -25,3 +25,5 @@ button:hover,.file-button:hover{filter:brightness(.94)}button:disabled{opacity:.
 .status{border-radius:20px;background:#f0f2f1;color:#53605a;padding:5px 10px;font-size:.82rem;white-space:nowrap}.status.connected{background:var(--green2);color:var(--green)}.error{color:var(--danger)}
 footer{text-align:center;color:var(--muted);padding:20px;font-size:.85rem}
 @media(max-width:650px){.grid{grid-template-columns:1fr}.line-row,.tax-row{grid-template-columns:1fr 1fr}.line-row label:first-child,.tax-row label:first-child{grid-column:1/-1}.line-row button,.tax-row button{grid-column:1/-1}.section-heading{align-items:flex-start;flex-wrap:wrap}.panel{border-radius:12px}header{padding:24px 18px}}
+
+.report-table {width:100%;border-collapse:collapse;margin:12px 0 20px;} .report-table th,.report-table td {text-align:left;padding:10px;border-bottom:1px solid #d8e2dc;} .report-table th {background:#eef5f0;}

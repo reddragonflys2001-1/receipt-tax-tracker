@@ -59,6 +59,14 @@
 </form>
 </section>
 <section class="panel">
+<h2>Yearly tax reports</h2>
+<p class="hint">Printed taxes and calculated estimates are reported separately. Estimates are not added to receipt spending or printed tax totals.</p>
+<label>Report year <select id="report-year"><option value="all">All years</option></select></label>
+<p id="report-summary" class="hint">No receipts yet.</p>
+<h3>Taxes by type</h3><div id="report-types"></div>
+<h3>Taxes by jurisdiction</h3><div id="report-jurisdictions"></div>
+</section>
+<section class="panel">
 <div class="section-heading"><div><h2>Saved receipts</h2><p class="muted" id="receipt-count">0 receipts</p></div><button id="export-csv" type="button">Export CSV</button></div>
 <div class="grid filters"><label>Search<input id="search" placeholder="Store, notes, category"></label><label>Year<select id="year-filter"><option value="all">All years</option></select></label></div>
 <div id="receipts-list" class="receipts-list"><p class="empty">Your saved receipts will appear here.</p></div>

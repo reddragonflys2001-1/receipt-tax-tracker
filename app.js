@@ -53,12 +53,17 @@ function setConnected(connected) {
   backupButton.disabled = !connected;
   restoreButton.disabled = !connected;
 }
+const TAX_TYPES = ['State sales tax','Local sales tax','Special/district tax','Product-specific tax','Other tax'];
 function addTax(data = {}) {
   const row = document.createElement('div');
   row.className = 'line-row tax-row';
+  const type = data.taxType || 'Other tax';
+  const source = data.source || 'Printed on receipt';
   row.innerHTML = `<label>Tax name<input data-key="name" placeholder="Local sales tax" value="${escapeHtml(data.name || '')}"></label>
     <label>Amount ($)<input data-key="amount" type="number" min="0" step="0.01" placeholder="0.00" value="${escapeHtml(data.amount ?? '')}"></label>
-    <label>Type<select data-key="source"><option ${data.source === 'Printed on receipt' ? 'selected' : ''}>Printed on receipt</option><option ${data.source === 'Calculated estimate' ? 'selected' : ''}>Calculated estimate</option></select></label>
+    <label>Tax type<select data-key="taxType">${TAX_TYPES.map(t => `<option ${t === type ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}</select></label>
+    <label>Jurisdiction<input data-key="jurisdiction" placeholder="Washington / Seattle" value="${escapeHtml(data.jurisdiction || '')}"></label>
+    <label>Recorded as<select data-key="source"><option ${source === 'Printed on receipt' ? 'selected' : ''}>Printed on receipt</option><option ${source === 'Calculated estimate' ? 'selected' : ''}>Calculated estimate</option></select></label>
     <button type="button" class="secondary">Remove</button>`;
   row.querySelector('button').addEventListener('click', () => row.remove());
   taxesBox.append(row);
@@ -111,7 +116,7 @@ form.addEventListener('submit', event => {
       name: row.name, qty: Number(row.qty || 1), price: row.price === '' ? '' : Number(row.price)
     })),
     taxes: getRows(taxesBox, 'tax-row').map(row => ({
-      name: row.name, amount: Number(row.amount || 0), source: row.source
+      name: row.name, amount: Number(row.amount || 0), taxType: row.taxType, jurisdiction: row.jurisdiction.trim(), source: row.source
     })),
     fuelType: data.get('fuelType') || '',
     gallons: data.get('gallons') === '' ? '' : Number(data.get('gallons')),
@@ -155,6 +160,7 @@ function renderReceipts() {
     (year === 'all' || String(r.date || '').startsWith(year)) &&
     [r.store, r.notes, r.category].join(' ').toLowerCase().includes(searchTerm)
   );
+  renderReports();
   const total = filtered.reduce((sum, r) => sum + Number(r.total || 0), 0);
   document.querySelector('#receipt-count').textContent = `${filtered.length} receipt${filtered.length === 1 ? '' : 's'} · Total $${money(total)}`;
   if (!filtered.length) {
@@ -168,7 +174,7 @@ function renderReceipts() {
       <div class="tax-summary">${(r.taxes || []).length} tax line(s) · ${(r.items || []).length} item(s)${r.gallons !== '' && r.gallons != null ? ` · ${escapeHtml(r.gallons)} gal ${escapeHtml(r.fuelType)}` : ''}</div>
       <details><summary>Details, taxes and notes</summary>
         <p><b>Subtotal:</b> ${r.subtotal === '' ? 'Not entered' : '$' + money(r.subtotal)}</p>
-        <b>Tax lines</b><ul>${(r.taxes || []).length ? r.taxes.map(t => `<li>${escapeHtml(t.name || 'Unnamed tax')}: $${money(t.amount)} <small>(${escapeHtml(t.source)})</small></li>`).join('') : '<li>No tax lines recorded</li>'}</ul>
+        <b>Tax lines</b><ul>${(r.taxes || []).length ? r.taxes.map(t => `<li>${escapeHtml(t.name || 'Unnamed tax')}: $${money(t.amount)} <small>(${escapeHtml(t.taxType || "Other tax")} · ${escapeHtml(t.jurisdiction || "Unspecified jurisdiction")} · ${escapeHtml(t.source || "Printed on receipt")})</small></li>`).join('') : '<li>No tax lines recorded</li>'}</ul>
         <b>Items</b><ul>${(r.items || []).length ? r.items.map(i => `<li>${escapeHtml(i.name)} — quantity ${escapeHtml(i.qty)}, $${money(i.price)}</li>`).join('') : '<li>No items recorded</li>'}</ul>
         <p><b>Notes:</b> ${escapeHtml(r.notes || 'None')}</p>
         ${r.photo ? `<img src="${r.photo}" alt="Receipt photo">` : ''}
@@ -207,11 +213,45 @@ function editReceipt(id) {
   form.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 function csvCell(value) { return '"' + String(value ?? '').replace(/"/g, '""') + '"'; }
+function renderReports() {
+  const selector = document.querySelector('#report-year');
+  const previous = selector.value;
+  const years = [...new Set(receipts.map(r => String(r.date || '').slice(0,4)).filter(y => /^\d{4}$/.test(y)))].sort().reverse();
+  selector.innerHTML = '<option value="all">All years</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
+  selector.value = years.includes(previous) ? previous : 'all';
+  const selected = receipts.filter(r => selector.value === 'all' || String(r.date || '').startsWith(selector.value));
+  const spending = selected.reduce((sum,r) => sum + Number(r.total || 0), 0);
+  const byType = new Map(), byJurisdiction = new Map();
+  let printed = 0, estimated = 0;
+  function accumulate(map, key, amount, isEstimate) {
+    const totals = map.get(key) || {printed:0, estimated:0};
+    totals[isEstimate ? 'estimated' : 'printed'] += amount;
+    map.set(key, totals);
+  }
+  selected.forEach(r => (r.taxes || []).forEach(t => {
+    const amount = Number(t.amount || 0);
+    if (!Number.isFinite(amount)) return;
+    const isEstimate = t.source === 'Calculated estimate';
+    if (isEstimate) estimated += amount; else printed += amount;
+    accumulate(byType, t.taxType || 'Other tax', amount, isEstimate);
+    accumulate(byJurisdiction, t.jurisdiction?.trim() || 'Unspecified jurisdiction', amount, isEstimate);
+  }));
+  document.querySelector('#report-summary').textContent = `${selected.length} receipts · Spending $${money(spending)} · Printed taxes $${money(printed)} · Estimated taxes $${money(estimated)}`;
+  function table(map) {
+    if (!map.size) return '<p class="empty">No tax lines recorded for this period.</p>';
+    return `<div style="overflow-x:auto"><table class="report-table"><thead><tr><th>Group</th><th>Printed</th><th>Estimated</th></tr></thead><tbody>${[...map].sort((a,b)=>a[0].localeCompare(b[0])).map(([key,v])=>`<tr><td>${escapeHtml(key)}</td><td>$${money(v.printed)}</td><td>$${money(v.estimated)}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  document.querySelector('#report-types').innerHTML = table(byType);
+  document.querySelector('#report-jurisdictions').innerHTML = table(byJurisdiction);
+}
+document.querySelector('#report-year').addEventListener('change', renderReports);
 document.querySelector('#export-csv').addEventListener('click', () => {
-  const headers = ['Store name','Purchase date','Category','Receipt total','Subtotal','Tax 1 name','Tax 1 amount','Tax 2 name','Tax 2 amount','Tax 3 name','Tax 3 amount','All tax lines JSON','Items JSON','Fuel type','Gallons','Price per gallon','Notes','Receipt photo included'];
+  const headers = ['Store name','Purchase date','Category','Receipt total','Subtotal',
+    ...[1,2,3].flatMap(i => [`Tax ${i} name`,`Tax ${i} amount`,`Tax ${i} type`,`Tax ${i} jurisdiction`,`Tax ${i} source`]),
+    'All tax lines JSON','Items JSON','Fuel type','Gallons','Price per gallon','Notes','Receipt photo included'];
   const rows = receipts.map(r => [
     r.store, r.date, r.category, r.total, r.subtotal,
-    ...[0,1,2].flatMap(i => [r.taxes?.[i]?.name || '', r.taxes?.[i]?.amount ?? '']),
+    ...[0,1,2].flatMap(i => { const t = r.taxes?.[i]; return [t?.name || '', t?.amount ?? '', t?.taxType || (t ? 'Other tax' : ''), t?.jurisdiction || '', t?.source || '']; }),
     JSON.stringify(r.taxes || []), JSON.stringify(r.items || []), r.fuelType, r.gallons, r.pricePerGallon, r.notes, r.photo ? 'yes' : 'no'
   ]);
   const csv = [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n');
