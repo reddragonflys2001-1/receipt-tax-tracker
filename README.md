@@ -11,3 +11,12 @@ Changes:
 - Updated the service-worker cache identifier.
 
 IMPORTANT: OCR is not guaranteed to recognize all items. Always verify extracted prices and the 23-item count against the original receipt before saving. The receipt's 23 items include the checkout bag fee; do not add a duplicate fee. If a printed amount is unreadable, correct it manually rather than trusting an inferred amount.
+
+
+## Update 19: live item reconciliation
+- A live item total and subtotal difference appear beneath the editable item list.
+- Editing a price or quantity, adding or removing an item, or changing the subtotal updates the live figures immediately.
+- The initial OCR warning is labeled as an initial snapshot; it does not overwrite manually edited amounts.
+- The receipt's printed item count is preserved for live row-count warnings.
+- OCR price recognition is not guaranteed accurate: compare all prices to the original image, especially BP XTR SRSRB.
+- The parser has **not** been trained to automatically correct $8.92 to $3.52, because doing so without evidence could corrupt other receipts.

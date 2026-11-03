@@ -450,6 +450,7 @@ function parseReceiptText(text) {
   itemsBox.querySelectorAll('[data-ocr-count-warning]').forEach(el=>el.remove());
   const soldLine=lines.find(line=>/#?\s*items\s+sold\s*:?\s*\d+/i.test(line));
   const soldCount=soldLine?Number(soldLine.match(/items\s+sold\s*:?\s*(\d+)/i)?.[1]||0):0;
+  itemsBox.dataset.ocrSoldCount = soldCount ? String(soldCount) : '';
   if(soldCount>0 && items.length<soldCount){
     const warning=document.createElement('p');
     warning.className='ocr-match-warning';
@@ -458,7 +459,7 @@ function parseReceiptText(text) {
     warning.textContent=`INCOMPLETE PRODUCT LIST: Receipt says ${soldCount} items sold, but OCR extracted only ${items.length} product rows. Check the original receipt; do not save this list as complete.`;
     itemsBox.prepend(warning);
   }
-  return {soldCount,itemReconciliationWarning:items.length && subtotal!==null && Math.abs(itemSum-subtotal)>0.02 ? ` Item suggestions total $${itemSum.toFixed(2)} versus printed subtotal $${subtotal.toFixed(2)}; review missing items and discounts.` : '',fields:[store&&'Store',date&&'Date',total!==null&&'Total',subtotal!==null&&'Subtotal'].filter(Boolean),taxCount:uniqueTaxes.length,itemCount:items.length,uncertainItems:items.filter(x=>x.uncertain).length,totalFromPayment,estimatedTax:uniqueTaxes.some(t=>t.source==='Calculated estimate'),pendingTaxReview:uniqueTaxes.some(t=>t.source==='Needs review (OCR suggestion)'),subtotalInferred};
+  return {soldCount,itemReconciliationWarning:items.length && subtotal!==null && Math.abs(itemSum-subtotal)>0.02 ? ` Initial OCR item suggestions totaled $${itemSum.toFixed(2)} versus receipt subtotal $${subtotal.toFixed(2)}. The live reconciliation below updates when you edit items.` : '',fields:[store&&'Store',date&&'Date',total!==null&&'Total',subtotal!==null&&'Subtotal'].filter(Boolean),taxCount:uniqueTaxes.length,itemCount:items.length,uncertainItems:items.filter(x=>x.uncertain).length,totalFromPayment,estimatedTax:uniqueTaxes.some(t=>t.source==='Calculated estimate'),pendingTaxReview:uniqueTaxes.some(t=>t.source==='Needs review (OCR suggestion)'),subtotalInferred};
 }
 scanButton.addEventListener('click',async()=>{
   if(!scanImages.length)return;

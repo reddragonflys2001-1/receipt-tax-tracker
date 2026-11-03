@@ -321,6 +321,44 @@ function addItem(data = {}) {
   row.querySelector('button').addEventListener('click', () => row.remove());
   itemsBox.append(row);
 }
+// Live reconciliation reflects the user's edits, not the original OCR snapshot.
+const itemReconciliation = document.createElement('div');
+itemReconciliation.id = 'live-item-reconciliation';
+itemReconciliation.setAttribute('role', 'status');
+itemReconciliation.setAttribute('aria-live', 'polite');
+itemReconciliation.style.cssText = 'margin:12px 0;padding:12px;border:1px solid #b7bec8;border-radius:8px;white-space:normal';
+itemsBox.parentElement.insertBefore(itemReconciliation, itemsBox.nextSibling);
+function refreshItemReconciliation() {
+  const rows = [...itemsBox.querySelectorAll('.item-row')];
+  const sold = Number(itemsBox.dataset.ocrSoldCount || 0);
+  const subtotalText = form.elements.subtotal.value;
+  const subtotal = subtotalText === '' ? null : Number(subtotalText);
+  let sum = 0;
+  let incomplete = false;
+  for (const row of rows) {
+    const qtyText = row.querySelector('[data-key="qty"]').value;
+    const priceText = row.querySelector('[data-key="price"]').value;
+    const qty = Number(qtyText), price = Number(priceText);
+    if (qtyText === '' || priceText === '' || !Number.isFinite(qty) || !Number.isFinite(price)) { incomplete = true; continue; }
+    sum += qty * price;
+  }
+  sum = Math.round(sum * 100) / 100;
+  const parts = [`Current edited item total: $${sum.toFixed(2)} (${rows.length} rows).`];
+  if (incomplete) parts.push('Some rows have missing or invalid quantities/prices; total is incomplete.');
+  if (subtotal !== null && Number.isFinite(subtotal)) {
+    const delta = Math.round((subtotal - sum) * 100) / 100;
+    parts.push(`Receipt subtotal: $${subtotal.toFixed(2)}. ${Math.abs(delta) < 0.01 && !incomplete ? 'Amounts match.' : `Difference: $${Math.abs(delta).toFixed(2)} ${delta >= 0 ? 'below' : 'above'} receipt subtotal.`}`);
+  } else parts.push('Enter a receipt subtotal to compare.');
+  if (sold && rows.length !== sold) parts.push(`INCOMPLETE ITEM COUNT: ${rows.length} rows versus ${sold} printed items sold. Review against receipt.`);
+  parts.push('OCR prices may be wrong even when totals match. Verify against the photo.');
+  itemReconciliation.textContent = parts.join(' ');
+}
+itemsBox.addEventListener('input', refreshItemReconciliation);
+itemsBox.addEventListener('change', refreshItemReconciliation);
+form.elements.subtotal.addEventListener('input', refreshItemReconciliation);
+const itemObserver = new MutationObserver(refreshItemReconciliation);
+itemObserver.observe(itemsBox, {childList:true});
+refreshItemReconciliation();
 function getRows(container, className) {
   return [...container.querySelectorAll('.' + className)].map(row => {
     const result = {};
