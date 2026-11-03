@@ -56,6 +56,27 @@ function setConnected(connected) {
 // Washington DOR review fields are advisory metadata only. Never auto-change printed tax lines.
 const WA_RATE_SOURCE = 'https://dor.wa.gov/taxes-rates/sales-use-tax-rates/sales-use-tax-rate-lookup';
 const WA_STATE_GENERAL_RATE = 6.5; // Washington general state retail sales tax; exceptions may apply.
+// A complete-looking address is only eligible for lookup; it is not verified by DOR.
+function validateWaStoreAddress(raw) {
+  const address = String(raw || '').replace(/\s+/g, ' ').trim();
+  if (!address) return {ok:false, message:'Enter the store street address, city, WA, and 5-digit ZIP before looking up tax.'};
+  const match = address.match(/^(.+?),\s*([^,]+),\s*(WA|Washington)\s+(\d{5})(?:-\d{4})?$/i);
+  if (!match || !/^\d+\s+\S/.test(match[1])) return {ok:false, message:'Check the address format: 315 N Amboy Ave, Yacolt, WA 98675. Include street number, street, city, WA, and ZIP.'};
+  return {ok:true, message:'Address format looks complete. Review it against the receipt, then use the official DOR lookup to verify the jurisdiction and rate.'};
+}
+function checkWaAddress() {
+  const result = validateWaStoreAddress(form.elements.storeAddress.value);
+  const status = document.querySelector('#wa-address-status');
+  status.textContent = result.message;
+  status.classList.toggle('error', !result.ok);
+  document.querySelector('#wa-official-link').hidden = !result.ok;
+  return result.ok;
+}
+document.querySelector('#wa-check-address').addEventListener('click', checkWaAddress);
+form.elements.storeAddress.addEventListener('input', () => {
+  document.querySelector('#wa-official-link').hidden = true;
+  document.querySelector('#wa-address-status').textContent = 'Address changed. Check it again before opening the tax lookup.';
+});
 function previewWaTax() {
   const out = document.querySelector('#wa-preview-result');
   const status = document.querySelector('#wa-lookup-status');
@@ -65,7 +86,7 @@ function previewWaTax() {
   const combined = Number(form.elements.waCombinedRate.value);
   const rateEntered = form.elements.waCombinedRate.value !== '';
   const printed = [...taxesBox.querySelectorAll('.tax-row')].filter(row => row.querySelector('[data-key="source"]').value === 'Printed on receipt').reduce((sum,row)=>sum+(Number(row.querySelector('[data-key="amount"]').value)||0),0);
-  if (!date || !address || !jurisdiction || !rateEntered || !Number.isFinite(combined) || combined < WA_STATE_GENERAL_RATE || combined > 30) {
+  if (!date || !validateWaStoreAddress(address).ok || !jurisdiction || !rateEntered || !Number.isFinite(combined) || combined < WA_STATE_GENERAL_RATE || combined > 30) {
     out.textContent = 'To preview, enter a purchase date, store address, verified jurisdiction, and verified combined rate of at least 6.5%. Check special cases with DOR.';
     return;
   }
