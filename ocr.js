@@ -63,22 +63,36 @@ function parseReceiptText(text) {
   const subtotal=subtotalLine?amount(subtotalLine):null;
   const dateMatch=text.match(/\b(20\d{2})[-\/.](\d{1,2})[-\/.](\d{1,2})\b|\b(\d{1,2})[\/.-](\d{1,2})[\/.-](20\d{2})\b/);
   let date='';if(dateMatch){const y=dateMatch[1]||dateMatch[6],m=dateMatch[2]||dateMatch[4],d=dateMatch[3]||dateMatch[5];date=`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;}
-  const store=lines.find(x=>/[A-Za-z]{3}/.test(x)&&!/^receipt|thank you|welcome|tel\b/i.test(x));
+  // Prefer coherent merchant-like headings over OCR noise above the receipt.
+  const headerLines=lines.slice(0,Math.min(lines.length,16));
+  const storeCandidates=headerLines.map((line,index)=>{
+    const cleaned=line.replace(/^[^A-Za-z0-9]+/, '').trim();
+    const letters=(cleaned.match(/[A-Za-z]/g)||[]).length;
+    const words=cleaned.split(/\s+/).filter(w=>/^[A-Za-z][A-Za-z'-]{2,}$/.test(w));
+    const noise=(cleaned.match(/[^A-Za-z0-9 \'&.-]/g)||[]).length;
+    const excluded=/\b(receipt|thank|welcome|invoice|order|cashier|station|date|time|closed|phone|tel|debit|card|street|ave|road|wa|subtotal)\b/i.test(cleaned);
+    const address=/\d{3,}|\b\d+\s+[NSEW]\b|\(\d{3}\)/.test(cleaned);
+    const score=words.length*5+letters*.35-noise*5-(excluded?25:0)-(address?25:0)-(index*.25);
+    return {cleaned,score,letters,words};
+  }).filter(v=>v.letters>=7&&v.words.length>=2);
+  const store=storeCandidates.sort((a,b)=>b.score-a.score)[0]?.cleaned||'';
   const totalCandidates=lines.filter(x=>/\b(grand\s*total|total|amount due|balance due)\b/i.test(x)&&!/subtotal|tax|savings/i.test(x)).map(amount).filter(x=>x!==null);
   const paymentCandidates=lines.filter(x=>/\b(debit card|credit card|card purchase|visa|mastercard|amount paid)\b/i.test(x)).map(amount).filter(x=>x!==null);
   const taxCandidates=[];
   for(const line of lines){
     if(/tax exempt|tax id|taxable grocery|taxable item/i.test(line))continue;
     if(/\b(sales tax|tax|gst|hst)\b/i.test(line)&&amount(line)!==null)taxCandidates.push({name:'Sales tax',amount:amount(line),source:'Printed on receipt'});
-    else if(/^\s*(?:\d{1,2}(?:[.,]\d{1,3})?\s*%?\s+)(?:\$\s*)?\d+[.,]\d{2}\s*$/.test(line)){
-      const parts=line.match(/^\s*(\d{1,2}(?:[.,]\d{1,3})?)\s*%?\s+\$?\s*(\d+[.,]\d{2})\s*$/);
+    else if(/(?:^|\s)\d{1,2}(?:[.,]\d{1,3})?\s*%?\s+\$?\s*\d+[.,]\d{2}\s*$/.test(line)){
+      const parts=line.match(/(?:^|\s)(\d{1,2}(?:[.,]\d{1,3})?)\s*%?\s+\$?\s*(\d+[.,]\d{2})\s*$/);
       if(parts&&Number(parts[1].replace(',','.'))<=15)taxCandidates.push({name:`Sales tax (${parts[1]}% printed rate)`,amount:Number(parts[2].replace(',','.')),source:'Printed on receipt'});
     }
   }
-  const uniqueTaxes=taxCandidates.filter((t,i,a)=>a.findIndex(v=>v.amount===t.amount)===i);
+  let uniqueTaxes=taxCandidates.filter((t,i,a)=>a.findIndex(v=>v.amount===t.amount)===i);
   let total=totalCandidates.find(v=>subtotal===null||v>=subtotal)||null;
   let totalFromPayment=false;
   if(total===null){const candidate=paymentCandidates.find(v=>subtotal===null||v>=subtotal);if(candidate!==undefined){total=candidate;totalFromPayment=true;}}
+  // A bare rate/amount pair is only accepted if it reconciles with the subtotal and total.
+  if(total!==null&&subtotal!==null){const delta=Math.round((total-subtotal)*100)/100;uniqueTaxes=uniqueTaxes.filter(t=>!t.name.includes('printed rate')||Math.abs(t.amount-delta)<.02);}
   // If OCR missed the tax label, only infer a tax amount when a printed payment and subtotal reconcile.
   if(!uniqueTaxes.length&&total!==null&&subtotal!==null){
     const difference=Math.round((total-subtotal)*100)/100;
