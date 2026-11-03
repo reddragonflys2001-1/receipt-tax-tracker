@@ -63,16 +63,18 @@ function parseReceiptText(text) {
   const subtotal=subtotalLine?amount(subtotalLine):null;
   const dateMatch=text.match(/\b(20\d{2})[-\/.](\d{1,2})[-\/.](\d{1,2})\b|\b(\d{1,2})[\/.-](\d{1,2})[\/.-](20\d{2})\b/);
   let date='';if(dateMatch){const y=dateMatch[1]||dateMatch[6],m=dateMatch[2]||dateMatch[4],d=dateMatch[3]||dateMatch[5];date=`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;}
-  // Prefer coherent merchant-like headings over OCR noise above the receipt.
-  const headerLines=lines.slice(0,Math.min(lines.length,16));
+  // Score merchant headings, rejecting OCR debris and address/transaction lines.
+  const headerLines=lines.slice(0,Math.min(lines.length,18));
   const storeCandidates=headerLines.map((line,index)=>{
     const cleaned=line.replace(/^[^A-Za-z0-9]+/, '').trim();
-    const letters=(cleaned.match(/[A-Za-z]/g)||[]).length;
     const words=cleaned.split(/\s+/).filter(w=>/^[A-Za-z][A-Za-z'-]{2,}$/.test(w));
+    const letters=(cleaned.match(/[A-Za-z]/g)||[]).length;
     const noise=(cleaned.match(/[^A-Za-z0-9 \'&.-]/g)||[]).length;
-    const excluded=/\b(receipt|thank|welcome|invoice|order|cashier|station|date|time|closed|phone|tel|debit|card|street|ave|road|wa|subtotal)\b/i.test(cleaned);
-    const address=/\d{3,}|\b\d+\s+[NSEW]\b|\(\d{3}\)/.test(cleaned);
-    const score=words.length*5+letters*.35-noise*5-(excluded?25:0)-(address?25:0)-(index*.25);
+    const excluded=/\b(receipt|thank|welcome|invoice|order|cashier|station|date|time|closed|phone|tel|debit|card|subtotal|total|purchase|item count)\b/i.test(cleaned);
+    const address=/\d{3,}|\b(?:ave|street|st|road|rd|blvd|wa|zip)\b|\b\d+\s+[NSEW]\b/i.test(cleaned);
+    const uppercase=(cleaned.match(/[A-Z]/g)||[]).length/Math.max(letters,1);
+    const shortWords=cleaned.split(/\s+/).filter(w=>/^[A-Za-z]{1,2}$/.test(w)).length;
+    const score=words.length*9+letters*.3+uppercase*8-noise*8-shortWords*7-(excluded?50:0)-(address?50:0)-(index*.4);
     return {cleaned,score,letters,words};
   }).filter(v=>v.letters>=7&&v.words.length>=2);
   const store=storeCandidates.sort((a,b)=>b.score-a.score)[0]?.cleaned||'';
@@ -81,10 +83,19 @@ function parseReceiptText(text) {
   const taxCandidates=[];
   for(const line of lines){
     if(/tax exempt|tax id|taxable grocery|taxable item/i.test(line))continue;
-    if(/\b(sales tax|tax|gst|hst)\b/i.test(line)&&amount(line)!==null)taxCandidates.push({name:'Sales tax',amount:amount(line),source:'Printed on receipt'});
-    else if(/(?:^|\s)\d{1,2}(?:[.,]\d{1,3})?\s*%?\s+\$?\s*\d+[.,]\d{2}\s*$/.test(line)){
-      const parts=line.match(/(?:^|\s)(\d{1,2}(?:[.,]\d{1,3})?)\s*%?\s+\$?\s*(\d+[.,]\d{2})\s*$/);
-      if(parts&&Number(parts[1].replace(',','.'))<=15)taxCandidates.push({name:`Sales tax (${parts[1]}% printed rate)`,amount:Number(parts[2].replace(',','.')),source:'Printed on receipt'});
+    if(/\b(sales tax|tax|gst|hst)\b/i.test(line)&&amount(line)!==null){
+      taxCandidates.push({name:'Sales tax',amount:amount(line),source:'Printed on receipt'});
+      continue;
+    }
+    // OCR often adds random symbols before a printed rate/amount pair,
+    // e.g. "x hie oe 5 8.4 $1.79". Match the END of the line.
+    const ratePair=line.match(/(?:^|\s)(\d{1,2}(?:[.,]\d{1,3})?)\s*%?\s+\$\s*(\d+[.,]\d{2})\s*$/);
+    if(ratePair){
+      const rate=Number(ratePair[1].replace(',','.'));
+      const value=Number(ratePair[2].replace(',','.'));
+      if(rate>0&&rate<=15&&value>0){
+        taxCandidates.push({name:`Sales tax (${rate}% printed rate)`,amount:value,source:'Printed on receipt'});
+      }
     }
   }
   let uniqueTaxes=taxCandidates.filter((t,i,a)=>a.findIndex(v=>v.amount===t.amount)===i);
@@ -103,22 +114,32 @@ function parseReceiptText(text) {
   reviewField('total',total!==null?money(total):'',true);
   // Avoid duplicating taxes when rescanning; preserve manually entered tax rows.
   taxesBox.querySelectorAll('.tax-row[data-ocr-suggestion]').forEach(row=>row.remove());
+  // Remove only the untouched starter tax row when actual OCR tax suggestions exist.
+  if(uniqueTaxes.length){
+    [...taxesBox.querySelectorAll('.tax-row')].forEach(row=>{
+      const name=row.querySelector('[data-key="name"]')?.value.trim();
+      const value=row.querySelector('[data-key="amount"]')?.value.trim();
+      if(!name && (!value || Number(value)===0) && !row.dataset.autoFuelTax)row.remove();
+    });
+  }
   uniqueTaxes.slice(0,8).forEach(t=>{addTax({...t,taxType:'Other tax'});taxesBox.lastElementChild.dataset.ocrSuggestion='true';});
-  // Conservative item recognition: product description and a separate quantity/unit-price line.
+  // Item rows commonly have a product description followed by a noisy price line.
+  // Only suggest a line when a recognizable unit price and final line price agree.
   itemsBox.querySelectorAll('.item-row[data-ocr-suggestion]').forEach(row=>row.remove());
   const items=[];
-  const excluded=/subtotal|grand total|debit|credit|purchase|cashier|station|invoice|order|date|thank you|tax|balance|change|ref num|transaction|card entry|auth code|gateway/i;
+  const excluded=/subtotal|grand total|debit|credit|purchase|cashier|station|invoice|order|date|thank you|tax|balance|change|ref num|transaction|card entry|auth code|weight|unit price|total price|item count|closed to/i;
   for(let i=0;i<lines.length-1;i++){
     const name=lines[i];const next=lines[i+1];
-    if(excluded.test(name)||name.length<6||!/[a-z]{3}/i.test(name)||/\$\s*\d+[.,]\d{2}/.test(name))continue;
-    const qtyMatch=next.match(/(?:^|\s)(\d+(?:[.,]\d+)?)\s*(?:pc|pcs|ea|@)\b/i);
+    if(excluded.test(name)||name.length<8||!/[a-z]{3}/i.test(name)||/\$\s*\d+[.,]\d{2}/.test(name))continue;
     const unitMatch=next.match(/\$\s*(\d+[.,]\d{2})\s*\/\s*(?:pc|ea)/i);
     const price=amount(next);
-    if(qtyMatch&&unitMatch&&price!==null){
-      const qty=Number(qtyMatch[1].replace(',','.'));
-      if(qty>0&&qty<=100&&price>0&&Math.abs(qty*Number(unitMatch[1].replace(',','.'))-price)<.04){
-        items.push({name:name.slice(0,110),qty,price});i++;
-      }
+    if(!unitMatch||price===null)continue;
+    const unit=Number(unitMatch[1].replace(',','.'));
+    // Quantity is often garbled. Infer it only when the printed unit and line
+    // totals reconcile to an integer; flag all extracted items for review.
+    const qty=Math.round(price/unit);
+    if(unit>0&&qty>=1&&qty<=100&&Math.abs(qty*unit-price)<.04){
+      items.push({name:name.replace(/^[^A-Za-z]+/,'').slice(0,110),qty,price});i++;
     }
   }
   items.slice(0,30).forEach(item=>{addItem(item);itemsBox.lastElementChild.dataset.ocrSuggestion='true';});
