@@ -1,3 +1,5 @@
+Update 28: targeted overlapping upper-receipt OCR crops with contrast pass; retains occurrence-aware UPC/price merge and blank-price review.
+
 Receipt & Tax Tracker — Stage 9 Update 18
 
 Upload the seven files to the root of your existing GitHub repository and commit them. Wait for the GitHub Pages deployment to finish. Test in a new Incognito window to avoid stale cached code.

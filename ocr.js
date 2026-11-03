@@ -109,6 +109,28 @@ function enlargedUpperReceiptRegion(source) {
   ctx.drawImage(source,0,top,source.width,bottom-top,0,0,canvas.width,canvas.height);
   return canvas;
 }
+// Independently inspect several small upper-receipt windows.  Cropping out
+// the barcode and unrelated rows gives Tesseract a different segmentation
+// opportunity.  Only UPC-and-price-verified new occurrences are merged.
+function focusedFirstItemRegions(source) {
+  const regions=[];
+  const windows=[[0.20,0.48],[0.34,0.62],[0.46,0.74]];
+  for(const [start,end] of windows){
+    const top=Math.floor(source.height*start);
+    const bottom=Math.min(source.height,Math.ceil(source.height*end));
+    if(bottom-top<70)continue;
+    const factor=2;
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.round(source.width*factor);
+    canvas.height=Math.round((bottom-top)*factor);
+    const ctx=canvas.getContext('2d',{willReadFrequently:true});
+    ctx.imageSmoothingEnabled=true;
+    ctx.imageSmoothingQuality='high';
+    ctx.drawImage(source,0,top,source.width,bottom-top,0,0,canvas.width,canvas.height);
+    regions.push(canvas);
+  }
+  return regions;
+}
 function receiptOcrItemScore(text){
   const lines=text.split(/\r?\n/);
   let scored=0;
@@ -675,6 +697,28 @@ scanButton.addEventListener('click',async()=>{
                 selectedText=mergeReceiptBandReadings(selectedText,focused.data.text||'');
               } finally {upper.width=0;upper.height=0;}
             }
+          }
+          // Additional narrow overlapping crops can recover product lines
+          // that full-band and broad upper-region OCR skip.  Do not concatenate
+          // the readings, which would duplicate repeated purchases.
+          if(j===0){
+            const regions=focusedFirstItemRegions(bands[j]);
+            try {
+              for(let k=0;k<regions.length;k++){
+                ocrStatus(`Checking first-item crop ${k+1}/${regions.length}, photo ${i+1}/${scanImages.length}...`);
+                const focused=await worker.recognize(regions[k]);
+                selectedText=mergeReceiptBandReadings(selectedText,focused.data.text||'');
+                // The alternate contrast pass is confined to the middle crop,
+                // keeping scan time reasonable on phones.
+                if(k===1){
+                  const contrasted=enhanceReceiptBand(regions[k]);
+                  try {
+                    const alt=await worker.recognize(contrasted);
+                    selectedText=mergeReceiptBandReadings(selectedText,alt.data.text||'');
+                  } finally {contrasted.width=0;contrasted.height=0;}
+                }
+              }
+            } finally {for(const region of regions){region.width=0;region.height=0;}}
           }
           texts.push(selectedText);
           bands[j].width=0;bands[j].height=0;
