@@ -91,6 +91,24 @@ function enhanceReceiptBand(source) {
   ctx.putImageData(frame,0,0);
   return canvas;
 }
+// Give the upper part of the first receipt section an additional enlarged
+// reading. Barcodes and tightly packed first item rows can cause Tesseract to
+// skip a line in a full-section pass. The supplemental text is NOT appended
+// wholesale: only UPC-verified, occurrence-checked lines may be recovered.
+function enlargedUpperReceiptRegion(source) {
+  const top=Math.floor(source.height*0.16);
+  const bottom=Math.min(source.height,Math.ceil(source.height*0.76));
+  if(bottom-top<120)return null;
+  const factor=1.65;
+  const canvas=document.createElement('canvas');
+  canvas.width=Math.round(source.width*factor);
+  canvas.height=Math.round((bottom-top)*factor);
+  const ctx=canvas.getContext('2d');
+  ctx.imageSmoothingEnabled=true;
+  ctx.imageSmoothingQuality='high';
+  ctx.drawImage(source,0,top,source.width,bottom-top,0,0,canvas.width,canvas.height);
+  return canvas;
+}
 function receiptOcrItemScore(text){
   const lines=text.split(/\r?\n/);
   let scored=0;
@@ -644,6 +662,20 @@ scanButton.addEventListener('click',async()=>{
           // without adding eight when both readings see the same four.
           selectedText=mergeReceiptBandReadings(selectedText,
             selectedText===originalText?alternativeText:originalText);
+          // Extra OCR on an enlarged upper region of the first band. Do not
+          // append its raw text (which would duplicate existing purchases).
+          // The occurrence-aware merge accepts only independently readable
+          // UPC + price rows missing from the main reading.
+          if(j===0){
+            const upper=enlargedUpperReceiptRegion(bands[j]);
+            if(upper){
+              try {
+                ocrStatus(`Checking enlarged first product rows, photo ${i+1}/${scanImages.length}...`);
+                const focused=await worker.recognize(upper);
+                selectedText=mergeReceiptBandReadings(selectedText,focused.data.text||'');
+              } finally {upper.width=0;upper.height=0;}
+            }
+          }
           texts.push(selectedText);
           bands[j].width=0;bands[j].height=0;
         }

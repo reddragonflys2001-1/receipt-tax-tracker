@@ -62,3 +62,10 @@ OCR now divides long receipt photos at nearby pale horizontal gaps instead of ov
 - Recover a multi-word product description followed by unreadable UPC/price OCR debris, with a blank price and manual review warning.
 - Keep Update 25 recovery of name-only repeated purchases and UPC-recognized products with missing prices.
 - Does not guarantee recovery of a line entirely absent from OCR (such as ONE GV 13OZ in the current test).
+
+## Update 27
+
+- Adds an enlarged, focused OCR pass for the upper portion of the first receipt band, where a barcode can interfere with recognition of the first product rows.
+- Merges only UPC-and-price verified extra lines with occurrence-aware checks; never appends the full extra OCR pass or guesses unreadable prices.
+- Preserves Update 26 recovery of product descriptions with damaged UPC/price and blank-price review warnings.
+- Actual OCR accuracy must be tested in the browser using the original receipt photo.
