@@ -222,43 +222,57 @@ function parseReceiptText(text) {
     usedPriceLines.add(candidate.j);
     i=candidate.j;
   }
-  // Many retail receipts print the quantity, product and extended price on ONE line.
-  // Keep this independent of the legacy multi-line grocery parser above.
-  const sameLineMoney=/\$\s*([0-9]{1,5}[.,][0-9]{2})\b/g;
-  const itemStop=/\b(?:subtotal|grand\s*total|total|tax|cashier|station|invoice|date|time|credit|debit|payment|balance|change|phone|transaction|receipt|discount\s*total|amount\s*due|authorization)\b/i;
+  // General-purpose one-line item parser: OCR often prefixes item lines with noise,
+  // drops the dollar sign/decimal, or corrupts parentheses on discounts.
+  const itemStop=/\b(?:subtotal|grand\s*total|total|tax|cashier|station|invoice|date|time|credit|debit|payment|balance|change|phone|transaction|receipt|amount\s*due|authorization)\b/i;
   const existingSources=new Set(items.map(x=>x.raw));
-  for(let i=0;i<lines.length;i++){
-    const raw=lines[i];
+  const pendingDiscounts=[];
+  for(const raw of lines){
     if(existingSources.has(raw)||itemStop.test(raw))continue;
-    const amounts=[...raw.matchAll(sameLineMoney)];
-    if(!amounts.length)continue;
-    const final=amounts[amounts.length-1];
-    let price=Number(final[1].replace(',','.'));
-    if(!Number.isFinite(price)||price<=0||price>100000)continue;
-    const before=raw.slice(0,final.index);
-    const isDiscount=/\b(?:employee|employees|coupon|discount|markdown|savings)\b/i.test(before);
-    // Never treat a printed discount as a purchased product, or silently guess
-    // whether a corrupted parenthesized number is a negative dollar amount.
-    if(isDiscount){
-      const looksNegative=/\(\s*\$?\s*[0-9]+[.,][0-9]{2}\s*\)|-\s*\$\s*[0-9]+[.,][0-9]{2}/.test(raw);
-      if(!looksNegative)continue;
-      price=-price;
-    }
-    let name=before.replace(/^[^A-Za-z0-9]*?(?=\d+\s*[-–]\s*|[A-Za-z])/,'')
-      .replace(/^\s*\d{1,2}\s*[-–]\s*/,'')
-      .replace(/\s+\d+(?:[.,]\d+)?\s*$/,'')
-      .replace(/[|§*]+/g,' ').replace(/\s+/g,' ').trim();
-    // Remove leading OCR fragments only if a clear product name follows.
-    name=name.replace(/^(?:[a-z]{1,3}|[=~—-]+)\s+(?=[A-Z][a-z])/,'').trim();
-    if(name.length<4||!/[A-Za-z]{3}/.test(name)||/^\d/.test(name))continue;
-    if(/\b(?:washington|included|taxable|change|cash)\b/i.test(name))continue;
-    const qtyMatch=before.match(/(?:^|\s)(\d{1,2})\s*[-–]\s*/);
-    const qty=qtyMatch?Number(qtyMatch[1]):1;
+    // Quantity prefix can be preceded by short OCR artifacts, e.g. "mt 1 -".
+    const prefix=raw.match(/(?:^|\s)(\d{1,2})\s*[-–]\s*(?=[A-Za-z])/);
+    if(!prefix)continue;
+    const qty=Number(prefix[1]);
     if(qty<1||qty>100)continue;
-    // Any line containing multiple prices or OCR noise must be checked by hand.
-    const uncertain=amounts.length>1||!qtyMatch||/^[a-z]{1,3}\s/.test(before)||isDiscount;
-    items.push({name:name.slice(0,110),qty,price,raw,priceText:raw,uncertain});
+    const body=raw.slice(prefix.index+prefix[0].length).trim();
+    const discount=/\b(?:employee|employe[es]*|coupon|discount|markdown|savings)\b/i.test(body);
+    const monetary=[...body.matchAll(/\$\s*(\d{1,5}[.,]\d{2})\b/g)];
+    let price=null, priceStart=-1, uncertain=false;
+    if(monetary.length){
+      const m=monetary.at(-1);price=Number(m[1].replace(',','.'));priceStart=m.index;
+      uncertain=monetary.length>1;
+    }else{
+      // A bare terminal 3-digit price ("$279" or "279") is ambiguous;
+      // suggest 2.79 only when OCR explicitly shows a quantity/product line.
+      const compact=body.match(/(?:\$\s*)?(\d{3})\s*[*'’]?\s*$/);
+      if(compact){price=Number(compact[1])/100;priceStart=compact.index;uncertain=true;}
+    }
+    if(discount){
+      // A clearly printed parenthesized/negative price can be accepted;
+      // corrupted values must be reconciled against the subtotal and flagged.
+      const negative=body.match(/\(\s*\$?\s*(\d+[.,]\d{2})\s*\)|-\s*\$\s*(\d+[.,]\d{2})/);
+      if(negative){
+        const readValue=Number((negative[1]||negative[2]).replace(',','.'));
+        if(subtotal!==null && readValue>subtotal){pendingDiscounts.push({raw,body,qty});continue;}
+        price=-readValue;priceStart=negative.index;uncertain=true;
+      }
+      else {pendingDiscounts.push({raw,body,qty});continue;}
+    }
+    if(price===null||!Number.isFinite(price)||Math.abs(price)>100000||price===0)continue;
+    let name=(priceStart>=0?body.slice(0,priceStart):body).replace(/\s+\d+(?:[.,]\d+)?\s*$/,'').replace(/[|§*]+/g,' ').replace(/\s+/g,' ').trim();
+    if(name.length<4||!/[A-Za-z]{3}/.test(name)||/\b(?:washington|included|taxable|change|cash)\b/i.test(name))continue;
+    items.push({name:name.slice(0,110),qty,price,raw,priceText:raw,uncertain:uncertain||/\b(?:criginal|200z|employes)\b/i.test(raw)});
     existingSources.add(raw);
+  }
+  // Only recover a corrupted discount if it makes the extracted item values
+  // reconcile exactly with a clearly printed subtotal. Always mark uncertain.
+  if(pendingDiscounts.length===1 && subtotal!==null){
+    const current=items.reduce((sum,item)=>sum+item.qty*item.price,0);
+    const needed=Math.round((subtotal-current)*100)/100;
+    const candidate=pendingDiscounts[0];
+    if(needed<0 && Math.abs(needed)<=current && /\(\s*[8$]?\d+[.,]\d{2}\s*\)/.test(candidate.body)){
+      items.push({name:'Employee discount (verify OCR)',qty:1,price:needed,raw:candidate.raw,priceText:'Amount inferred from printed subtotal; VERIFY original discount',uncertain:true});
+    }
   }
   // Itemized lines are suggestions; warn if they do not reconcile with the
   // printed subtotal (which may legitimately exclude included taxes/discounts).
@@ -298,7 +312,7 @@ scanButton.addEventListener('click',async()=>{
     document.querySelectorAll('.ocr-uncertain').forEach(el=>el.classList.remove('ocr-uncertain'));
     const parsed=parseReceiptText(combined);
     if(scanImages.length){pendingPhoto=scanImages[0];window.pendingOcrPhotos=[...scanImages];}
-    scanWarnings.textContent=`OCR suggested ${parsed.fields.join(', ')||'no standard fields'} and ${parsed.taxCount} tax suggestion(s), plus ${parsed.itemCount} possible item(s). ${parsed.uncertainItems?parsed.uncertainItems+" item match(es) need extra review. ":""}${parsed.totalFromPayment?"Total was suggested from a payment line. ":""}${parsed.itemReconciliationWarning||''}${parsed.estimatedTax?"A possible tax was estimated from the difference; it is NOT verified printed tax. ":""}Verify every field, tax and item before saving. Never add a calculated tax estimate on top of a printed tax. Only the first photo is shown in older receipt views; all optimized photos are saved in the receipt record.`;
+    scanWarnings.textContent=`OCR suggested ${parsed.fields.join(', ')||'no standard fields'} and ${parsed.taxCount} tax suggestion(s), plus ${parsed.itemCount} possible item(s). ${parsed.uncertainItems?parsed.uncertainItems+" item match(es) need extra review. ":""}${parsed.totalFromPayment?"Total was suggested from a payment line. ":""}${parsed.itemReconciliationWarning||''}${parsed.itemCount===0?' No products were extracted: check OCR product lines and review manually. ':''}${parsed.estimatedTax?"A possible tax was estimated from the difference; it is NOT verified printed tax. ":""}Verify every field, tax and item before saving. Never add a calculated tax estimate on top of a printed tax. Only the first photo is shown in older receipt views; all optimized photos are saved in the receipt record.`;
     ocrStatus('Scan complete. Review highlighted fields and the receipt photo before saving.');
     document.dispatchEvent(new Event('receipt-ocr-complete'));
     form.scrollIntoView({behavior:'smooth',block:'start'});
