@@ -48,11 +48,19 @@
 <div id="items"></div>
 <div id="wa-lookup" class="fuel-section">
 <h3>Washington sales tax lookup (review required)</h3>
-<p class="hint">Use the official Department of Revenue lookup to verify the tax location and historical rate for the purchase date. This version checks address completeness before you open the official lookup; it does not automatically retrieve DOR results. Enter only verified information; leave fields blank if unknown.</p>
+<p class="hint">Use the official Department of Revenue lookup to verify the tax location and historical rate for the purchase date. After scanning, the app automatically checks the DOR address API and offers a suggestion for approval when its rate period matches the receipt date. Enter only verified information; leave fields blank if unknown.</p>
 <div class="actions"><button type="button" class="secondary" id="wa-check-address">Check store address</button><a id="wa-official-link" hidden href="https://webgis.dor.wa.gov/taxratelookup/salestax.aspx" target="_blank" rel="noopener noreferrer">Open official WA tax lookup</a> <a href="https://dor.wa.gov/taxes-rates/sales-use-tax-rates/downloadable-database" target="_blank" rel="noopener noreferrer">Historical quarterly data</a></div>
 <p id="wa-address-status" class="hint" aria-live="polite">Check the store address before opening the official tax lookup. A complete address is not proof of the correct jurisdiction.</p>
 <div class="actions"><button type="button" class="secondary" id="wa-test-access">Test automatic WA tax lookup</button></div>
 <p id="wa-access-status" class="hint" aria-live="polite">Tests whether this app can read the official address API. Results are diagnostic only and never change your receipt or saved tax fields.</p>
+<div class="actions"><button type="button" class="secondary" id="wa-auto-retry">Retry automatic WA tax lookup</button></div>
+<p id="wa-auto-status" class="hint" role="status" aria-live="polite">Scan a receipt to check its Washington store address automatically. You must approve any suggestion before it fills the tax review fields.</p>
+<div id="wa-suggestion" class="fuel-section" hidden>
+<strong>Official WA tax suggestion — approval required</strong>
+<p id="wa-suggestion-details" class="hint"></p>
+<p class="hint">Compare the address, date, and printed tax against your receipt. This is an informational rate suggestion, not a replacement for printed tax.</p>
+<div class="actions"><button type="button" id="wa-approve-suggestion" disabled>Approve WA suggestion</button><button type="button" class="secondary" id="wa-review-manually">Review manually / dismiss</button></div>
+</div>
 <div class="grid">
 <label>Tax location / jurisdiction (verified)<input name="waTaxJurisdiction" placeholder="e.g. Yacolt" autocomplete="off"></label>
 <label>WA tax location code (if available)<input name="waTaxCode" placeholder="DOR location code" autocomplete="off"></label>

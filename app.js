@@ -126,7 +126,93 @@ document.querySelector('#wa-test-access').addEventListener('click', async () => 
   }
 });
 
+// Suggested DOR data is held in memory until the user explicitly approves it.
+let waSuggestion = null;
+let waApproved = false;
+let waLookupSequence = 0;
+const waSuggestionBox = document.querySelector('#wa-suggestion');
+const waApproveButton = document.querySelector('#wa-approve-suggestion');
+const waReviewButton = document.querySelector('#wa-review-manually');
+function receiptQuarter(date) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])-\d{2}$/.test(date || '')) return '';
+  return `Q${Math.ceil(Number(date.slice(5,7))/3)}${date.slice(0,4)}`;
+}
+function invalidateWaSuggestion(message = 'Address or purchase date changed. Scan again or request a new lookup.') {
+  waLookupSequence++;
+  waSuggestion = null;
+  waApproved = false;
+  waSuggestionBox.hidden = true;
+  waApproveButton.disabled = true;
+  document.querySelector('#wa-auto-status').textContent = message;
+}
+function waAddressParts() {
+  const match = form.elements.storeAddress.value.replace(/\s+/g,' ').trim()
+    .match(/^(.+?),\s*([^,]+),\s*(?:WA|Washington)\s+(\d{5})(?:-\d{4})?$/i);
+  return match && /^\d+\s+\S/.test(match[1]) ? match : null;
+}
+async function autoLookupWa() {
+  invalidateWaSuggestion('Checking address and purchase date…');
+  const sequence = waLookupSequence;
+  const match = waAddressParts();
+  const date = form.elements.date.value;
+  const expectedPeriod = receiptQuarter(date);
+  const status = document.querySelector('#wa-auto-status');
+  if (!match || !expectedPeriod) {
+    status.textContent = 'Automatic lookup needs a complete Washington address and a valid purchase date. Review the OCR fields first, then retry.';
+    return;
+  }
+  const originalAddress = form.elements.storeAddress.value;
+  const url = `https://webgis.dor.wa.gov/webapi/AddressRates.aspx?${new URLSearchParams({output:'xml',addr:match[1],city:match[2],zip:match[3]})}`;
+  status.textContent = 'Looking up the store address with Washington DOR…';
+  const controller = new AbortController();
+  const timeout = setTimeout(()=>controller.abort(),12000);
+  try {
+    const response = await fetch(url,{mode:'cors',cache:'no-store',signal:controller.signal});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const xml = new DOMParser().parseFromString(await response.text(),'application/xml');
+    if (xml.querySelector('parsererror') || xml.documentElement.nodeName.toLowerCase() !== 'response') throw new Error('Unexpected XML response');
+    const root=xml.documentElement, rate=root.querySelector('rate'), address=root.querySelector('addressline');
+    const locationCode=root.getAttribute('loccode') || '';
+    const period=address?.getAttribute('period') || '';
+    const combined=Number(root.getAttribute('rate'))*100;
+    const state=Number(rate?.getAttribute('staterate'))*100;
+    const local=Number(rate?.getAttribute('localrate'))*100;
+    const jurisdiction=rate?.getAttribute('name') || '';
+    if (sequence !== waLookupSequence || originalAddress !== form.elements.storeAddress.value || date !== form.elements.date.value) return;
+    if (!locationCode || locationCode === '-1' || !jurisdiction || !period || !Number.isFinite(combined) || combined <= 0 || !Number.isFinite(state) || !Number.isFinite(local) || Math.abs(state+local-combined) > .011) throw new Error('DOR did not return a complete, consistent tax result');
+    if (period.toUpperCase() !== expectedPeriod.toUpperCase()) {
+      status.textContent=`DOR returned ${period}, but this receipt is dated in ${expectedPeriod}. Historical rate NOT verified. No suggestion can be approved; check official historical quarterly data.`;
+      return;
+    }
+    waSuggestion={jurisdiction,locationCode,combined,state,local,period,address:originalAddress,date};
+    document.querySelector('#wa-suggestion-details').textContent=`${jurisdiction} · code ${locationCode} · state ${state.toFixed(2)}% · local ${local.toFixed(2)}% · combined ${combined.toFixed(2)}% · ${period}`;
+    waSuggestionBox.hidden=false;
+    waApproveButton.disabled=false;
+    status.textContent='Official rate matches the receipt quarter. Review the suggestion and approve it to fill the WA review fields. Printed tax remains unchanged.';
+  } catch(error) {
+    if (sequence === waLookupSequence) status.textContent=`Automatic lookup unavailable (${error.name === 'AbortError' ? 'timed out' : error.message}). Review the address or use the manual official lookup; no data changed.`;
+  } finally {clearTimeout(timeout);}
+}
+document.querySelector('#wa-auto-retry').addEventListener('click',autoLookupWa);
+waApproveButton.addEventListener('click',()=>{
+  const v=waSuggestion;
+  if (!v || v.address !== form.elements.storeAddress.value || v.date !== form.elements.date.value || v.period.toUpperCase() !== receiptQuarter(v.date).toUpperCase()) return invalidateWaSuggestion();
+  form.elements.waTaxJurisdiction.value=v.jurisdiction;
+  form.elements.waTaxCode.value=v.locationCode;
+  form.elements.waCombinedRate.value=v.combined.toFixed(3);
+  form.elements.waRatePeriod.value=`${v.date.slice(0,4)} Q${v.period.charAt(1)}`;
+  waApproved=true;
+  waSuggestionBox.hidden=true;
+  document.querySelector('#wa-auto-status').textContent='Approved: WA review fields filled. Printed tax lines and receipt totals have not changed. Save the receipt when ready.';
+});
+waReviewButton.addEventListener('click',()=>invalidateWaSuggestion('Automatic suggestion dismissed. Review or enter the Washington tax fields manually.'));
+form.elements.date.addEventListener('change',()=>invalidateWaSuggestion());
+for (const name of ['waTaxJurisdiction','waTaxCode','waCombinedRate','waRatePeriod']) {
+  form.elements[name].addEventListener('input',()=>{waApproved=false;});
+}
+document.addEventListener('receipt-ocr-complete',()=>{void autoLookupWa();});
 form.elements.storeAddress.addEventListener('input', () => {
+  invalidateWaSuggestion();
   document.querySelector('#wa-official-link').hidden = true;
   document.querySelector('#wa-address-status').textContent = 'Address changed. Check it again before opening the tax lookup.';
 });
@@ -267,7 +353,7 @@ form.addEventListener('submit', event => {
     id: editId || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
     store: String(data.get('store') || '').trim(),
     storeAddress: String(data.get('storeAddress') || '').trim(),
-    waTaxReview: {jurisdiction:String(data.get('waTaxJurisdiction')||'').trim(), locationCode:String(data.get('waTaxCode')||'').trim(), combinedRate:data.get('waCombinedRate')===''?'':Number(data.get('waCombinedRate')), ratePeriod:String(data.get('waRatePeriod')||'').trim(), source:WA_RATE_SOURCE, reviewedManually:Boolean(String(data.get('waTaxJurisdiction')||'').trim() && String(data.get('waCombinedRate')||'').trim())},
+    waTaxReview: {jurisdiction:String(data.get('waTaxJurisdiction')||'').trim(), locationCode:String(data.get('waTaxCode')||'').trim(), combinedRate:data.get('waCombinedRate')===''?'':Number(data.get('waCombinedRate')), ratePeriod:String(data.get('waRatePeriod')||'').trim(), source:WA_RATE_SOURCE, reviewedManually:Boolean(waApproved || (String(data.get('waTaxJurisdiction')||'').trim() && String(data.get('waTaxCode')||'').trim() && String(data.get('waCombinedRate')||'').trim() && String(data.get('waRatePeriod')||'').trim())), approvalMethod:waApproved?'DOR API suggestion approved':'Manual entry reviewed'},
     date: String(data.get('date') || ''),
     category: String(data.get('category') || ''),
     total: Number(data.get('total') || 0),
@@ -293,6 +379,7 @@ form.addEventListener('submit', event => {
   else receipts.unshift(record);
   if (!persist()) return;
   editId = null;
+  invalidateWaSuggestion('No automatic tax lookup pending.');
   form.reset();
   itemsBox.innerHTML = '';
   taxesBox.innerHTML = '';
@@ -308,6 +395,7 @@ form.addEventListener('reset', () => {
     pendingPhoto = '';
     if (window.resetOcrPhotos) window.resetOcrPhotos();
     editId = null;
+    invalidateWaSuggestion('No automatic tax lookup pending.');
     form.querySelector('[type="submit"]').textContent = 'Save receipt';
     toggleFuelSection();
   }, 0);
@@ -356,6 +444,7 @@ function renderReceipts() {
   receiptsList.querySelectorAll('[data-edit]').forEach(button => button.addEventListener('click', () => editReceipt(button.dataset.edit)));
 }
 function editReceipt(id) {
+  invalidateWaSuggestion('Saved receipt opened. Use Retry automatic lookup if needed.');
   const receipt = receipts.find(r => r.id === id);
   if (!receipt) return;
   editId = id;
