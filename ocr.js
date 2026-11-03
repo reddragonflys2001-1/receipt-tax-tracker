@@ -123,26 +123,48 @@ function parseReceiptText(text) {
     });
   }
   uniqueTaxes.slice(0,8).forEach(t=>{addTax({...t,taxType:'Other tax'});taxesBox.lastElementChild.dataset.ocrSuggestion='true';});
-  // Item rows commonly have a product description followed by a noisy price line.
-  // Only suggest a line when a recognizable unit price and final line price agree.
+  // Keep original OCR beside editable suggestions; do not silently invent missing words.
   itemsBox.querySelectorAll('.item-row[data-ocr-suggestion]').forEach(row=>row.remove());
   const items=[];
   const excluded=/subtotal|grand total|debit|credit|purchase|cashier|station|invoice|order|date|thank you|tax|balance|change|ref num|transaction|card entry|auth code|weight|unit price|total price|item count|closed to/i;
+  function cleanProductName(raw) {
+    let name=raw.replace(/^[^A-Za-z]*?(?=(?:FS\s+)?(?:MISC|CAYMAN|AM\s+SPIRIT|SPIRIT|[A-Z]{3,}))/i,'')
+      .replace(/\s*[-–]\s*\d{7,}[^\s]*/g,'')
+      .replace(/[-–]\d{7,}[^\s]*/g,'')
+      .replace(/[|§%*]+/g,' ')
+      .replace(/\s+/g,' ').trim();
+    // OCR frequently attaches fragments to the start of otherwise legible names.
+    const anchor=name.match(/\b(?:FS\s+MISC|MISC|CAYMAN|AM\s+SPIRIT|SPIRIT)\b/i);
+    if(anchor && anchor.index>0)name=name.slice(anchor.index);
+    name=name.replace(/\bNISC\b/gi,'MISC').replace(/\bJCK\b/gi,'JACK')
+      .replace(/\bTRWBRY\b/gi,'STRAWBERRY')
+      .replace(/\bGROCK\b/gi,'GROCERY');
+    return name.slice(0,110);
+  }
+  // A receipt often prints description on one line, quantity and unit/line prices on the next.
   for(let i=0;i<lines.length-1;i++){
-    const name=lines[i];const next=lines[i+1];
-    if(excluded.test(name)||name.length<8||!/[a-z]{3}/i.test(name)||/\$\s*\d+[.,]\d{2}/.test(name))continue;
+    const raw=lines[i],next=lines[i+1];
+    if(excluded.test(raw)||raw.length<8||!/[a-z]{3}/i.test(raw)||/\$\s*\d+[.,]\d{2}/.test(raw))continue;
     const unitMatch=next.match(/\$\s*(\d+[.,]\d{2})\s*\/\s*(?:pc|ea)/i);
     const price=amount(next);
     if(!unitMatch||price===null)continue;
     const unit=Number(unitMatch[1].replace(',','.'));
-    // Quantity is often garbled. Infer it only when the printed unit and line
-    // totals reconcile to an integer; flag all extracted items for review.
     const qty=Math.round(price/unit);
-    if(unit>0&&qty>=1&&qty<=100&&Math.abs(qty*unit-price)<.04){
-      items.push({name:name.replace(/^[^A-Za-z]+/,'').slice(0,110),qty,price});i++;
-    }
+    if(!(unit>0&&qty>=1&&qty<=100&&Math.abs(qty*unit-price)<.04))continue;
+    const cleaned=cleanProductName(raw);
+    if(cleaned.length<5)continue;
+    items.push({name:cleaned,qty,price,raw});i++;
   }
-  items.slice(0,30).forEach(item=>{addItem(item);itemsBox.lastElementChild.dataset.ocrSuggestion='true';});
+  items.slice(0,30).forEach(item=>{
+    addItem(item);
+    const row=itemsBox.lastElementChild;
+    row.dataset.ocrSuggestion='true';
+    row.querySelector('[data-key="name"]').classList.add('ocr-uncertain');
+    const details=document.createElement('details');details.className='ocr-item-source';
+    const summary=document.createElement('summary');summary.textContent='Original OCR product text — compare before saving';
+    const original=document.createElement('pre');original.textContent=item.raw;
+    details.append(summary,original);row.append(details);
+  });
   return {fields:[store&&'Store',date&&'Date',total!==null&&'Total',subtotal!==null&&'Subtotal'].filter(Boolean),taxCount:uniqueTaxes.length,itemCount:items.length,totalFromPayment,estimatedTax:uniqueTaxes.some(t=>t.source==='Calculated estimate')};
 }
 scanButton.addEventListener('click',async()=>{

@@ -53,3 +53,8 @@ footer{text-align:center;color:var(--muted);padding:20px;font-size:.85rem}
 .tax-row > label:nth-child(5){grid-column:1/-1}
 .tax-row > button{grid-column:1/-1}
 @media(max-width:440px){.tax-row{grid-template-columns:minmax(0,1fr)}.tax-row > label,.tax-row > button{grid-column:1/-1}}
+
+/* OCR suggestions: preserve source text for review on narrow screens. */
+.ocr-item-source { grid-column: 1 / -1; width: 100%; min-width: 0; font-size: .85rem; }
+.ocr-item-source pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: .4rem 0; }
+.item-row input { min-width: 0; max-width: 100%; }
