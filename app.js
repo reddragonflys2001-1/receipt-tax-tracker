@@ -311,6 +311,31 @@ function editReceipt(id) {
   form.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 function csvCell(value) { return '"' + String(value ?? '').replace(/"/g, '""') + '"'; }
+// Advisory allocation only: never changes receipt tax lines or totals.
+// Apply only to manually reviewed WA general sales-tax records whose rate period matches the purchase quarter.
+function reviewedWaAllocation(receipt) {
+  const review = receipt.waTaxReview || {};
+  const date = String(receipt.date || '');
+  const quarter = /^\d{4}-(0[1-9]|1[0-2])-\d{2}$/.test(date)
+    ? `${date.slice(0,4)} Q${Math.ceil(Number(date.slice(5,7))/3)}` : '';
+  const period = String(review.ratePeriod || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  const combined = Number(review.combinedRate);
+  if (!review.reviewedManually || !review.jurisdiction || !review.locationCode ||
+      !quarter || period !== quarter || !receipt.storeAddress ||
+      !Number.isFinite(combined) || combined < WA_STATE_GENERAL_RATE || combined > 30) return null;
+  const printed = (receipt.taxes || []).reduce((sum,t) => {
+    if (t.source !== 'Printed on receipt') return sum;
+    if (FUEL_TAX_NAMES.includes(t.name) || ['Product-specific tax','Special/district tax','Washington State Fuel Tax','Federal Fuel Tax'].includes(t.taxType)) return sum;
+    const amount = Number(t.amount);
+    return Number.isFinite(amount) && amount > 0 ? sum + amount : sum;
+  },0);
+  if (!printed) return null;
+  const cents = Math.round(printed * 100);
+  const stateCents = Math.round(cents * WA_STATE_GENERAL_RATE / combined);
+  return {jurisdiction:String(review.jurisdiction).trim(), code:String(review.locationCode).trim(),
+    period:quarter, state:stateCents/100, local:(cents-stateCents)/100, printed:cents/100};
+}
+
 function renderReports() {
   const selector = document.querySelector('#report-year');
   const previous = selector.value;
@@ -341,6 +366,33 @@ function renderReports() {
   }
   document.querySelector('#report-types').innerHTML = table(byType);
   document.querySelector('#report-jurisdictions').innerHTML = table(byJurisdiction);
+  const waGroups = new Map();
+  let waCount = 0, waUnallocated = 0;
+  selected.forEach(receipt => {
+    const allocation = reviewedWaAllocation(receipt);
+    if (!allocation) {
+      if ((receipt.taxes || []).some(t => t.source === 'Printed on receipt' && Number(t.amount) > 0)) waUnallocated++;
+      return;
+    }
+    const key = `${allocation.jurisdiction} (${allocation.code})`;
+    const group = waGroups.get(key) || {state:0,local:0,printed:0,count:0};
+    group.state += Math.round(allocation.state*100);
+    group.local += Math.round(allocation.local*100);
+    group.printed += Math.round(allocation.printed*100);
+    group.count++;
+    waGroups.set(key,group);
+    waCount++;
+  });
+  const waOut = document.querySelector('#report-wa-allocation');
+  if (!waGroups.size) {
+    waOut.innerHTML = '<p class="empty">No reviewed Washington sales-tax allocations for this period. Original printed taxes remain listed above.</p>';
+  } else {
+    const groups = [...waGroups].sort((a,b)=>a[0].localeCompare(b[0]));
+    const totals = groups.reduce((sum,[,g])=>({state:sum.state+g.state,local:sum.local+g.local,printed:sum.printed+g.printed}),{state:0,local:0,printed:0});
+    waOut.innerHTML = `<p class="hint">${waCount} receipt(s) with reviewed jurisdiction, location code, rate and matching purchase quarter. These are calculated allocations of existing printed sales tax, <strong>not additional taxes</strong>. They do not change the original tax classifications or report totals.</p><div style="overflow-x:auto"><table class="report-table"><thead><tr><th>Washington jurisdiction</th><th>State (allocated)</th><th>Local (allocated)</th><th>Printed tax allocated</th></tr></thead><tbody>${groups.map(([key,g])=>`<tr><td>${escapeHtml(key)}</td><td>$${money(g.state/100)}</td><td>$${money(g.local/100)}</td><td>$${money(g.printed/100)}</td></tr>`).join('')}<tr><th>Total</th><th>$${money(totals.state/100)}</th><th>$${money(totals.local/100)}</th><th>$${money(totals.printed/100)}</th></tr></tbody></table></div>`;
+  }
+  if (waUnallocated) waOut.insertAdjacentHTML('beforeend', `<p class="hint">${waUnallocated} receipt(s) with printed tax were not allocated because required review information was missing or not applicable. Special and product-specific taxes need separate verification.</p>`);
+
   const fuel = {Gasoline:{gallons:0, state:0, federal:0, count:0}, Diesel:{gallons:0, state:0, federal:0, count:0}};
   selected.filter(r => r.category === 'Gas and vehicle' && Object.hasOwn(fuel, r.fuelType)).forEach(r => {
     const entry = fuel[r.fuelType];
