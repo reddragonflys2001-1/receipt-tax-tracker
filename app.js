@@ -53,6 +53,29 @@ function setConnected(connected) {
   backupButton.disabled = !connected;
   restoreButton.disabled = !connected;
 }
+// Washington DOR review fields are advisory metadata only. Never auto-change printed tax lines.
+const WA_RATE_SOURCE = 'https://dor.wa.gov/taxes-rates/sales-use-tax-rates/sales-use-tax-rate-lookup';
+const WA_STATE_GENERAL_RATE = 6.5; // Washington general state retail sales tax; exceptions may apply.
+function previewWaTax() {
+  const out = document.querySelector('#wa-preview-result');
+  const status = document.querySelector('#wa-lookup-status');
+  const date = form.elements.date.value;
+  const address = form.elements.storeAddress.value.trim();
+  const jurisdiction = form.elements.waTaxJurisdiction.value.trim();
+  const combined = Number(form.elements.waCombinedRate.value);
+  const rateEntered = form.elements.waCombinedRate.value !== '';
+  const printed = [...taxesBox.querySelectorAll('.tax-row')].filter(row => row.querySelector('[data-key="source"]').value === 'Printed on receipt').reduce((sum,row)=>sum+(Number(row.querySelector('[data-key="amount"]').value)||0),0);
+  if (!date || !address || !jurisdiction || !rateEntered || !Number.isFinite(combined) || combined < WA_STATE_GENERAL_RATE || combined > 30) {
+    out.textContent = 'To preview, enter a purchase date, store address, verified jurisdiction, and verified combined rate of at least 6.5%. Check special cases with DOR.';
+    return;
+  }
+  if (!printed) { out.textContent = 'No printed tax amount found. Add or scan a printed sales-tax line before previewing an allocation.'; return; }
+  const state = roundCents(printed * WA_STATE_GENERAL_RATE / combined);
+  const local = roundCents(printed - state);
+  status.textContent = 'Review-only calculation using the general 6.5% WA state rate. Check taxability, special rates and rounding against DOR records.';
+  out.textContent = `Suggested allocation of the existing $${money(printed)} printed tax: state $${money(state)}, local $${money(local)} (combined ${combined}% in ${jurisdiction}). These are NOT additional tax lines and are NOT included separately in reports. Verify before saving.`;
+}
+document.querySelector('#wa-preview').addEventListener('click', previewWaTax);
 const TAX_TYPES = ['State sales tax','Local sales tax','Special/district tax','Product-specific tax','Washington State Fuel Tax','Federal Fuel Tax','Other tax'];
 // Published Washington DOL gasoline and highway diesel rates, through Dec 2026.
 // Do not guess rates outside supported dates or for other fuels.
@@ -170,6 +193,7 @@ form.addEventListener('submit', event => {
     id: editId || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
     store: String(data.get('store') || '').trim(),
     storeAddress: String(data.get('storeAddress') || '').trim(),
+    waTaxReview: {jurisdiction:String(data.get('waTaxJurisdiction')||'').trim(), locationCode:String(data.get('waTaxCode')||'').trim(), combinedRate:data.get('waCombinedRate')===''?'':Number(data.get('waCombinedRate')), ratePeriod:String(data.get('waRatePeriod')||'').trim(), source:WA_RATE_SOURCE, reviewedManually:Boolean(String(data.get('waTaxJurisdiction')||'').trim() && String(data.get('waCombinedRate')||'').trim())},
     date: String(data.get('date') || ''),
     category: String(data.get('category') || ''),
     total: Number(data.get('total') || 0),
@@ -263,6 +287,11 @@ function editReceipt(id) {
   editId = id;
   form.elements.store.value = receipt.store || '';
   form.elements.storeAddress.value = receipt.storeAddress || '';
+  form.elements.waTaxJurisdiction.value = receipt.waTaxReview?.jurisdiction || '';
+  form.elements.waTaxCode.value = receipt.waTaxReview?.locationCode || '';
+  form.elements.waCombinedRate.value = receipt.waTaxReview?.combinedRate ?? '';
+  form.elements.waRatePeriod.value = receipt.waTaxReview?.ratePeriod || '';
+  document.querySelector('#wa-preview-result').textContent = '';
   form.elements.date.value = receipt.date || '';
   form.elements.category.value = receipt.category || 'Other';
   form.elements.total.value = receipt.total ?? '';
