@@ -236,7 +236,7 @@ function previewWaTax() {
   out.textContent = `Suggested allocation of the existing $${money(printed)} printed tax: state $${money(state)}, local $${money(local)} (combined ${combined}% in ${jurisdiction}). These are NOT additional tax lines and are NOT included separately in reports. Verify before saving.`;
 }
 document.querySelector('#wa-preview').addEventListener('click', previewWaTax);
-const TAX_TYPES = ['State sales tax','Local sales tax','Special/district tax','Product-specific tax','Washington State Fuel Tax','Federal Fuel Tax','Other tax'];
+const TAX_TYPES = ['Combined sales tax','State sales tax','Local sales tax','Special/district tax','Product-specific tax','Washington State Fuel Tax','Federal Fuel Tax','Other tax'];
 // Published Washington DOL gasoline and highway diesel rates, through Dec 2026.
 // Do not guess rates outside supported dates or for other fuels.
 const FUEL_RATE_SOURCE = 'https://dol.wa.gov/vehicles-and-boats/prorate-and-fuel-tax/fuel-tax/fuel-licenses/fuel-licenses-motor-vehicle-fuel-or-special-fuel';

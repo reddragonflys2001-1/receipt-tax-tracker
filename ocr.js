@@ -150,7 +150,7 @@ function parseReceiptText(text) {
   for(const line of lines){
     if(/tax exempt|tax id|taxable grocery|taxable item/i.test(line))continue;
     // Walmart receipts often print a compact line such as "TAXI 8.9000 % 3.18".
-    const walmartTax=line.match(/\bTAX\s*I?\s+(\d{1,2}[.,]\d{2,4})\s*%\s+\$?\s*(\d+[.,]\d{2})\b/i);
+    const walmartTax=line.match(/\bTAX\s*[1Il|]?\s+(\d{1,2}[.,]\d{2,4})\s*%\s+\$?\s*(\d+[.,]\d{2})\b/i);
     if(walmartTax){
       taxCandidates.push({name:`Sales tax (${walmartTax[1].replace(',','.') }% printed rate)`,amount:Number(walmartTax[2].replace(',','.')),source:'Printed on receipt'});
       continue;
@@ -221,7 +221,7 @@ function parseReceiptText(text) {
     });
   }
   uniqueTaxes.slice(0,8).forEach(t=>{
-    addTax({...t,taxType:'Other tax'});
+    addTax({...t,taxType:t.name.toLowerCase().includes('sales tax')?'Combined sales tax':'Other tax'});
     const row=taxesBox.lastElementChild;
     row.dataset.ocrSuggestion='true';
     if(t.ocrEvidence){
@@ -305,6 +305,41 @@ function parseReceiptText(text) {
     usedPriceLines.add(candidate.j);
     i=candidate.j;
   }
+  // Walmart's itemized receipt prints one product per UPC row, sometimes with
+  // an F taxability marker BEFORE the UPC and a trailing X/N/O marker.
+  // Parse the item region as a whole; do not borrow prices from other rows.
+  const walmartReceipt=/\b(?:walmart|wm\s+supercenter)\b/i.test(text) && /items\s+sold/i.test(text);
+  let walmartParsedItems=[];
+  if(walmartReceipt){
+    const start=lines.findIndex(x=>/items\s+sold\s*:?\s*\d+/i.test(x));
+    const end=lines.findIndex((x,i)=>i>start && /\b(?:subtotal|subt[o0]tal|tax\s*[1Il]|grand\s+total|debit\s+tend)\b/i.test(x));
+    const region=lines.slice(Math.max(0,start+1),end>start?end:undefined);
+    const walmartItems=[];
+    for(const raw of region){
+      // Anchored UPC followed by a printed price, not arbitrary numbers in OCR debris.
+      const m=raw.match(/\b(\d[\d ]{7,17}\d)\s+(?:[FNTO]\s+)?\$?\s*(\d{1,3}[.,]\d{2})\s*(?:[XNTO0])?\s*$/i);
+      if(!m)continue;
+      const upc=m[1].replace(/\s/g,'');
+      if(upc.length<10||upc.length>14)continue;
+      let name=raw.slice(0,m.index).replace(/\s+[FNTO]\s*$/i,'').replace(/^[^A-Za-z]+/,'').replace(/[|§]+/g,' ').replace(/\s+/g,' ').trim();
+      name=name.replace(/^(?:(?:SN|SS|SNS|Wa|Ne|Bi|aN|bo|eh|pl|EL|Xu|J)\s+){1,3}/i,'').trim();
+      if(!/[A-Za-z]{3}/.test(name)||name.length<3)continue;
+      const price=Number(m[2].replace(',','.'));
+      if(!Number.isFinite(price)||price<=0||price>1000)continue;
+      walmartItems.push({name:name.slice(0,110),qty:1,price,raw,priceText:raw,uncertain:true});
+    }
+    // When the UPC parser recovers a more complete, reconciled list, use it
+    // instead of generic suggestions (which may misread an item as $8.92).
+    walmartParsedItems=walmartItems;
+    const walmartSum=walmartItems.reduce((a,x)=>a+x.price,0);
+    const walmartSold=Number(text.match(/items\s+sold\s*:?\s*(\d+)/i)?.[1]||0);
+    const genericSum=items.reduce((a,x)=>a+x.qty*x.price,0);
+    const betterCount=walmartItems.length>items.length;
+    const betterSubtotal=subtotal!==null && Math.abs(walmartSum-subtotal)<Math.abs(genericSum-subtotal)-0.02;
+    if(walmartItems.length && (betterCount||betterSubtotal)){
+      items.splice(0,items.length,...walmartItems);
+    }
+  }
   // General-purpose one-line item parser: OCR often prefixes item lines with noise,
   // drops the dollar sign/decimal, or corrupts parentheses on discounts.
   const itemStop=/\b(?:subtotal|grand\s*total|total|tax|cashier|station|invoice|date|time|credit|debit|payment|balance|change|phone|transaction|receipt|amount\s*due|authorization)\b/i;
@@ -369,6 +404,17 @@ function parseReceiptText(text) {
     if(name.length<3||!/[A-Za-z]{3}/.test(name)||!Number.isFinite(price)||price<=0||price>10000)continue;
     items.push({name:name.slice(0,110),qty:1,price,raw,priceText:raw,uncertain:true});
     knownItemLines.add(raw);
+  }
+  // Compare all suggestions with the UPC-anchored Walmart extraction after
+  // generic recovery. A fuller UPC list or closer subtotal wins; never silently
+  // modify a price to force reconciliation.
+  if(walmartParsedItems.length){
+    const upcSum=walmartParsedItems.reduce((a,x)=>a+x.price,0);
+    const generalSum=items.reduce((a,x)=>a+x.qty*x.price,0);
+    const closer=subtotal!==null && Math.abs(upcSum-subtotal)+0.02<Math.abs(generalSum-subtotal);
+    if(walmartParsedItems.length>items.length || (walmartParsedItems.length===items.length && closer)){
+      items.splice(0,items.length,...walmartParsedItems);
+    }
   }
   // Only recover a corrupted discount if it makes the extracted item values
   // reconcile exactly with a clearly printed subtotal. Always mark uncertain.
