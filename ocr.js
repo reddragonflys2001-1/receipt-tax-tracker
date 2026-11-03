@@ -76,31 +76,39 @@ function receiptOcrItemScore(text){
   }
   return scored;
 }
-// Combine complementary OCR readings of the SAME image band without
-// doubling repeated purchases. Only add a line when its UPC has more
-// occurrences in the alternate reading than in the selected reading.
-// Price differences alone never create another purchase.
+// Merge two readings of the same physical receipt band conservatively.
+// A damaged UPC can differ between passes for the *same* product. Require
+// BOTH the UPC occurrence and normalized product-name occurrence to be new.
+// This preserves repeated items when one pass actually sees more copies,
+// without treating a different OCR spelling of a UPC as another purchase.
 function mergeReceiptBandReadings(primary, alternate) {
   const a=primary.split(/\r?\n/), b=alternate.split(/\r?\n/);
   const item=(line)=>{
     const m=line.match(/\b(\d[\d ]{8,16}\d)K?\s+(?:[FNTO]\s+)?\$?\s*(\d{1,4}[.,]\d{2})\s*[XNTO0]?\s*$/i);
     if(!m)return null;
     const upc=m[1].replace(/\s/g,'');
-    const name=line.slice(0,m.index).replace(/^[^A-Za-z]+/,'').trim();
+    const name=line.slice(0,m.index).replace(/^[^A-Za-z]+/,'').replace(/^(?:(?:SN|SS|SNS|Wa|Ne|Bi|aN|bo|eh|pl|EL|Xu|J)\s+){1,3}/i,'').trim();
     if(upc.length<10||upc.length>14||!/[A-Za-z]{3}/.test(name))return null;
-    return {upc,line};
+    const key=name.toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^[0-9]+/,'');
+    if(key.length<4)return null;
+    return {upc,key,line};
   };
-  const counts=new Map();
-  for(const line of a){const x=item(line);if(x)counts.set(x.upc,(counts.get(x.upc)||0)+1);}
-  const seen=new Map(), extras=[];
+  const count=(lines,field)=>{
+    const counts=new Map();
+    for(const line of lines){const x=item(line);if(x)counts.set(x[field],(counts.get(x[field])||0)+1);}
+    return counts;
+  };
+  const upcs=count(a,'upc'), names=count(a,'key');
+  const seenUpcs=new Map(), seenNames=new Map(), extras=[];
   for(const line of b){
     const x=item(line);if(!x)continue;
-    const occurrence=(seen.get(x.upc)||0)+1;seen.set(x.upc,occurrence);
-    if(occurrence>(counts.get(x.upc)||0))extras.push(x);
+    const upcOccurrence=(seenUpcs.get(x.upc)||0)+1;
+    const nameOccurrence=(seenNames.get(x.key)||0)+1;
+    seenUpcs.set(x.upc,upcOccurrence);
+    seenNames.set(x.key,nameOccurrence);
+    if(upcOccurrence>(upcs.get(x.upc)||0) && nameOccurrence>(names.get(x.key)||0))extras.push(x);
   }
   if(!extras.length)return primary;
-  // Insert before the printed subtotal/tax/total so the normal parser sees
-  // them as receipt products. All inserted rows remain OCR suggestions.
   let insert=a.findIndex(line=>/\b(?:subtotal|subt[o0]tal|tax\s*[1Il]|total)\b/i.test(line));
   if(insert<0)insert=a.length;
   a.splice(insert,0,...extras.map(x=>x.line));

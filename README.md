@@ -37,3 +37,11 @@ IMPORTANT: OCR is not guaranteed to recognize all items. Always verify extracted
 - Accepts the Walmart checkout bag-fee UPC suffix `K` when a readable price is present.
 - Preserves manual price correction, live reconciliation, separate tax lines, and the incomplete-item warning.
 - **All OCR prices remain suggestions**: visually verify every price, quantity and item against the photo before saving. A second OCR reading is not independent proof of price accuracy.
+
+
+## Update 22 — conservative OCR merge deduplication
+- Extra lines from the second OCR pass now require a higher occurrence count for **both** normalized product description and UPC, not UPC alone.
+- This avoids adding a second copy when the two passes disagree about a product UPC but recognize the same item name.
+- Legitimate repeated items remain separate when an alternate scan really contains more occurrences.
+- Conservative merging may still miss items with unreadable names, and it does not automatically correct prices.
+- Re-test the Walmart receipt and compare the entire extracted list with the original before saving.
