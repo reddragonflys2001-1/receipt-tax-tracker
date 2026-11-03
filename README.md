@@ -55,3 +55,10 @@ OCR now divides long receipt photos at nearby pale horizontal gaps instead of ov
 - Suppress an isolated OCR echo immediately before SUBTOTAL from product suggestions only when an identical UPC and price occur earlier and a blank line separates the echo.
 - Preserve legitimate repeated product rows. Raw OCR text remains unmodified for inspection.
 - This does not repair OCR-misread prices or recover unreadable item lines; compare against receipt before saving.
+
+
+## Update 26
+
+- Recover a multi-word product description followed by unreadable UPC/price OCR debris, with a blank price and manual review warning.
+- Keep Update 25 recovery of name-only repeated purchases and UPC-recognized products with missing prices.
+- Does not guarantee recovery of a line entirely absent from OCR (such as ONE GV 13OZ in the current test).

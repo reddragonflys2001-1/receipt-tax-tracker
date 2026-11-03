@@ -548,6 +548,18 @@ function parseReceiptText(text) {
       else {
         const bare=raw.replace(/^[^A-Za-z]+/,'').trim();
         if(/^[A-Za-z][A-Za-z0-9 ]{5,45}$/.test(bare) && items.some(x=>key(x.name)===key(bare)))name=bare;
+        // Thermal OCR can read the description but corrupt BOTH UPC and price.
+        // Example: ONE TI CH DK GLyBOnL 720 2 ¢
+        // Recover a leading, multi-word uppercase product description only if
+        // the remainder has mixed-case OCR debris and digits. The blank price
+        // must be reviewed manually; never infer it from the subtotal.
+        if(!name){
+          const broken=bare.match(/^((?:[A-Z][A-Z0-9]{1,11}\s+){2,5}[A-Z][A-Z0-9]{1,11})\s+([A-Za-z0-9\s¢$.,:;|]+)$/);
+          if(broken && /[a-z]/.test(broken[2]) && /\d/.test(broken[2]) &&
+             /[A-Z]{2}/.test(broken[1]) && broken[1].length>=8){
+            name=broken[1];
+          }
+        }
       }
       name=name.replace(/^(?:(?:SN|SS|SNS|Wa|Ne|Bi|aN|bo|eh|pl|EL|Xu|J)\s+){1,3}/i,'').replace(/\s+/g,' ').trim();
       if(name.length<5||!/[A-Za-z]{3}/.test(name))continue;
