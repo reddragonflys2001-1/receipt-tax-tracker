@@ -49,3 +49,9 @@ IMPORTANT: OCR is not guaranteed to recognize all items. Always verify extracted
 ## Update 23 — nonoverlapping OCR sections
 
 OCR now divides long receipt photos at nearby pale horizontal gaps instead of overlapping sections. This is designed to prevent the same printed UPC row being read twice at section boundaries while retaining genuine repeated purchases. OCR price mistakes and unreadable product rows still require manual review. Test against the original receipt before saving.
+
+## Update 24
+
+- Suppress an isolated OCR echo immediately before SUBTOTAL from product suggestions only when an identical UPC and price occur earlier and a blank line separates the echo.
+- Preserve legitimate repeated product rows. Raw OCR text remains unmodified for inspection.
+- This does not repair OCR-misread prices or recover unreadable item lines; compare against receipt before saving.

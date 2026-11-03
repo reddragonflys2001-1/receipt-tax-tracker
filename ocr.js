@@ -140,6 +140,29 @@ function mergeReceiptBandReadings(primary, alternate) {
   a.splice(insert,0,...extras.map(x=>x.line));
   return a.join('\n');
 }
+// A stray OCR echo can appear in the blank gap between the last purchase
+// and SUBTOTAL. Only suppress it for item extraction when the same UPC AND
+// price were already read above, and the echo is isolated by a blank line.
+// Do not deduplicate ordinary repeated UPCs: multiple identical purchases
+// are valid and must remain separate rows.
+function suppressIsolatedFooterEcho(text) {
+  const lines=text.split(/\r?\n/);
+  const signature=line=>{
+    const m=line.match(/\b(\d[\d ]{8,16}\d)K?\s+(?:[FNTO]\s+)?\$?\s*(\d{1,4}[.,]\d{2})\s*[:;]?\s*[XNTO0]?\s*$/i);
+    return m ? m[1].replace(/\s/g,'')+'|'+m[2].replace(',','.') : null;
+  };
+  const suppressed=[];
+  for(let i=2;i<lines.length-1;i++){
+    if(lines[i-1].trim()!=='' || !/\bsubt[o0]tal\b/i.test(lines[i+1]))continue;
+    const sig=signature(lines[i]);
+    if(!sig)continue;
+    if(lines.slice(0,i-1).some(line=>signature(line)===sig)){
+      suppressed.push(lines[i]);
+      lines[i]='';
+    }
+  }
+  return {text:lines.join('\n'),suppressed};
+}
 function renderScanImages() {
   scanPreview.replaceChildren();
   scanImages.forEach((src,index) => {
@@ -593,11 +616,12 @@ scanButton.addEventListener('click',async()=>{
     }
     finally {await worker.terminate();}
     const combined=texts.join('\n');scanText.value=combined;
+    const footerCheck=suppressIsolatedFooterEcho(combined);
     // Clear prior OCR suggestions only, leave existing manual fields/taxes intact.
     document.querySelectorAll('.ocr-uncertain').forEach(el=>el.classList.remove('ocr-uncertain'));
-    const parsed=parseReceiptText(combined);
+    const parsed=parseReceiptText(footerCheck.text);
     if(scanImages.length){pendingPhoto=scanImages[0];window.pendingOcrPhotos=[...scanImages];}
-    scanWarnings.textContent=`OCR suggested ${parsed.fields.join(', ')||'no standard fields'} and ${parsed.taxCount} tax suggestion(s), plus ${parsed.itemCount} possible item(s). ${parsed.soldCount&&parsed.itemCount<parsed.soldCount?`Receipt says ${parsed.soldCount} items sold but only ${parsed.itemCount} item rows were recognized. Do not treat the item list as complete. `:''}${parsed.uncertainItems?parsed.uncertainItems+" item match(es) need extra review. ":""}${parsed.totalFromPayment?"Total was suggested from a payment line. ":""}${parsed.itemReconciliationWarning||''}${parsed.itemCount===0?' No products were extracted: check OCR product lines and review manually. ':''}${parsed.estimatedTax?"A possible tax was estimated from the difference; it is NOT verified printed tax. ":""}${parsed.pendingTaxReview?"A printed tax label was detected but the amount was unreadable. Review and classify the suggested amount before saving. ":""}${parsed.subtotalInferred?"Subtotal was calculated as total minus the readable printed tax. Verify it against the receipt before saving. ":""}Verify every field, tax and item before saving. Never add a calculated tax estimate on top of a printed tax. Only the first photo is shown in older receipt views; all optimized photos are saved in the receipt record.`;
+    scanWarnings.textContent=`${footerCheck.suppressed.length ? footerCheck.suppressed.length+" isolated duplicate near SUBTOTAL excluded from item suggestions; verify against the photo. " : ""}OCR suggested ${parsed.fields.join(', ')||'no standard fields'} and ${parsed.taxCount} tax suggestion(s), plus ${parsed.itemCount} possible item(s). ${parsed.soldCount&&parsed.itemCount<parsed.soldCount?`Receipt says ${parsed.soldCount} items sold but only ${parsed.itemCount} item rows were recognized. Do not treat the item list as complete. `:''}${parsed.uncertainItems?parsed.uncertainItems+" item match(es) need extra review. ":""}${parsed.totalFromPayment?"Total was suggested from a payment line. ":""}${parsed.itemReconciliationWarning||''}${parsed.itemCount===0?' No products were extracted: check OCR product lines and review manually. ':''}${parsed.estimatedTax?"A possible tax was estimated from the difference; it is NOT verified printed tax. ":""}${parsed.pendingTaxReview?"A printed tax label was detected but the amount was unreadable. Review and classify the suggested amount before saving. ":""}${parsed.subtotalInferred?"Subtotal was calculated as total minus the readable printed tax. Verify it against the receipt before saving. ":""}Verify every field, tax and item before saving. Never add a calculated tax estimate on top of a printed tax. Only the first photo is shown in older receipt views; all optimized photos are saved in the receipt record.`;
     ocrStatus('Scan complete. Review highlighted fields and the receipt photo before saving.');
     document.dispatchEvent(new Event('receipt-ocr-complete'));
     form.scrollIntoView({behavior:'smooth',block:'start'});
