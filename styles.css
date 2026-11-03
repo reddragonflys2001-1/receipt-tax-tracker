@@ -111,3 +111,6 @@ footer{text-align:center;color:var(--muted);padding:20px;font-size:.85rem}
   .line-row.item-row > label {grid-column:1 / -1;}
 }
 #items-container {container-type:inline-size;min-width:0;max-width:100%;}
+
+/* Stage 8: uncertain OCR item matches remain visible in the responsive editor. */
+.line-row.item-row > .ocr-match-warning{grid-column:1/-1;margin:0;padding:8px 10px;border-left:3px solid #b97817;background:#fff6df;color:#53380d;border-radius:4px;font-size:.9rem;}

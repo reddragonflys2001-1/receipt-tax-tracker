@@ -136,51 +136,64 @@ function parseReceiptText(text) {
     // OCR frequently attaches fragments to the start of otherwise legible names.
     const anchor=name.match(/\b(?:FS\s+MISC|MISC|CAYMAN|AM\s+SPIRIT|SPIRIT)\b/i);
     if(anchor && anchor.index>0)name=name.slice(anchor.index);
-    name=name.replace(/\bNISC\b/gi,'MISC').replace(/\bJCK\b/gi,'JACK')
+    name=name.replace(/^.*?(?=\bFS\s+(?:NISC|MISC)\b)/i,'')
+      .replace(/\bNISC\b/gi,'MISC').replace(/\bJCK\b/gi,'JACK')
       .replace(/\bTRWBRY\b/gi,'STRAWBERRY')
-      .replace(/\bGROCK\b/gi,'GROCERY');
+      .replace(/\bGROCK\b/gi,'GROCERY')
+      .replace(/\s*=\s*[A-Z ]{1,18}$/i,'')
+      .replace(/\s+\d{1,2}\s*$/,'')
+      .replace(/\s*\(\d{1,2}\s*$/,'');
     return name.slice(0,110);
   }
-  // Prices can be on the next line, or one more line down when OCR
-  // separates the quantity from the unit price. Avoid treating header noise as items.
+  // Match a product heading to its own price row, never across another heading.
+  // A receipt may put quantity, unit price and extended price on separate OCR lines.
   const productAnchors=/\b(?:MISC|NISC|GROCERY|CAYMAN|SPIRIT|FS\s+MISC)\b/i;
   const pricePattern=/\$\s*(\d+[.,]\d{2})\s*\/\s*(?:pc|ea)\b/i;
+  const productHeading=line=>{
+    if(/\b(?:subtotal|grand total|debit|credit|purchase|cashier|station|invoice|order|date|thank you|balance|change|ref num|transaction|card entry|auth code|weight|unit price|total price|item count|closed to)\b/i.test(line))return false;
+    // 'taxable grocery' is a product, not a tax line.
+    if(/\b(?:sales tax|tax total|tax due|gst|hst)\b/i.test(line))return false;
+    return productAnchors.test(line) && /[A-Za-z]{3,}/.test(line) && !/\$\s*\d+[.,]\d{2}/.test(line);
+  };
   const usedPriceLines=new Set();
   for(let i=0;i<lines.length;i++){
     const raw=lines[i];
-    if(excluded.test(raw) && !/taxable\s+grocery/i.test(raw))continue;
-    if(raw.length<8||!/\b[A-Za-z]{3,}\b/.test(raw)||/\$\s*\d+[.,]\d{2}/.test(raw))continue;
-    // On noisy scans the product label may contain a leading fragment.
-    // Require a recognizable product word or a plausible description.
-    if(!productAnchors.test(raw) && !/^[A-Z][A-Z\s-]{7,}/.test(raw))continue;
+    if(!productHeading(raw))continue;
     let candidate=null;
     for(let offset=1;offset<=3 && i+offset<lines.length;offset++){
       const j=i+offset;
+      if(productHeading(lines[j]))break; // never borrow a later item's price
       if(usedPriceLines.has(j))continue;
       const next=lines[j];
-      const unitMatch=next.match(pricePattern);
-      if(!unitMatch)continue;
-      const unit=Number(unitMatch[1].replace(',','.'));
-      // Some OCR outputs corrupt the line-total but retain the unit price.
-      // Prefer a valid amount at the end; otherwise use a nearby quantity.
       const allAmounts=[...next.matchAll(/\$\s*(\d+[.,]\d{2})/g)].map(m=>Number(m[1].replace(',','.')));
-      const last=allAmounts.at(-1);
-      let qty=1,price=unit;
-      if(allAmounts.length>=2 && last>=unit && Math.abs(Math.round(last/unit)*unit-last)<.04){
-        qty=Math.round(last/unit);price=last;
-      } else {
-        const between=lines.slice(i+1,j+1).join(' ');
-        const explicit=between.match(/(?:^|\s)(\d{1,2})\s*(?:pc|ea)\b/i);
-        if(explicit){qty=Number(explicit[1]);price=Math.round(qty*unit*100)/100;}
+      if(!allAmounts.length)continue;
+      const unitMatch=next.match(pricePattern);
+      const unit=unitMatch?Number(unitMatch[1].replace(',','.')):null;
+      // The last printed dollar value is normally the extended line total.
+      const price=allAmounts.at(-1);
+      if(!Number.isFinite(price)||price<=0||price>100000)continue;
+      const context=lines.slice(i+1,j+1).join(' ');
+      const qtyMatch=context.match(/(?:^|\s)(\d{1,2})\s*(?:pc|pe|ea)\b/i);
+      let qty=qtyMatch?Number(qtyMatch[1]):1;
+      let uncertain=!qtyMatch;
+      // A reliable unit price plus line total is stronger than OCR quantity debris.
+      if(unit!==null && unit>0 && price>=unit){
+        const ratio=price/unit;
+        if(Math.abs(ratio-Math.round(ratio))<0.02 && ratio>=1 && ratio<=100){
+          qty=Math.round(ratio);
+          uncertain=false;
+        }else if(qtyMatch && Math.abs(qty*unit-price)>0.03){uncertain=true;}
       }
+      // OCR sometimes reads '$4.29' as '$84.29' in the unit-price position.
+      // Do not let that corrupt the final printed line amount.
       if(qty<1||qty>100)continue;
-      candidate={j,qty,price};break;
+      candidate={j,qty,price,uncertain};break;
     }
     if(!candidate)continue;
     const cleaned=cleanProductName(raw);
     if(cleaned.length<5)continue;
-    // Never invent a name from the known example; keep ambiguous OCR for review.
-    items.push({name:cleaned,qty:candidate.qty,price:candidate.price,raw});
+    const uncertain=candidate.uncertain || /\b(?:MISC|NISC|GROCERY)\b/i.test(cleaned) || /\b\d+\s*$/.test(cleaned);
+    items.push({name:cleaned,qty:candidate.qty,price:candidate.price,raw,priceText:lines[candidate.j],uncertain});
     usedPriceLines.add(candidate.j);
     i=candidate.j;
   }
@@ -189,12 +202,14 @@ function parseReceiptText(text) {
     const row=itemsBox.lastElementChild;
     row.dataset.ocrSuggestion='true';
     row.querySelector('[data-key="name"]').classList.add('ocr-uncertain');
+    if(item.uncertain){row.querySelector('[data-key="qty"]').classList.add('ocr-uncertain');row.dataset.reviewNeeded='true';}
     const details=document.createElement('details');details.className='ocr-item-source';
     const summary=document.createElement('summary');summary.textContent='Original OCR product text — compare before saving';
-    const original=document.createElement('pre');original.textContent=item.raw;
+    const original=document.createElement('pre');original.textContent='Description: '+item.raw+'\nPrice line: '+item.priceText;
     details.append(summary,original);row.append(details);
+    if(item.uncertain){const note=document.createElement('p');note.className='ocr-match-warning';note.textContent='Review this match: OCR could not fully verify the description or quantity against the price.';row.append(note);}
   });
-  return {fields:[store&&'Store',date&&'Date',total!==null&&'Total',subtotal!==null&&'Subtotal'].filter(Boolean),taxCount:uniqueTaxes.length,itemCount:items.length,totalFromPayment,estimatedTax:uniqueTaxes.some(t=>t.source==='Calculated estimate')};
+  return {fields:[store&&'Store',date&&'Date',total!==null&&'Total',subtotal!==null&&'Subtotal'].filter(Boolean),taxCount:uniqueTaxes.length,itemCount:items.length,uncertainItems:items.filter(x=>x.uncertain).length,totalFromPayment,estimatedTax:uniqueTaxes.some(t=>t.source==='Calculated estimate')};
 }
 scanButton.addEventListener('click',async()=>{
   if(!scanImages.length)return;
@@ -211,7 +226,7 @@ scanButton.addEventListener('click',async()=>{
     document.querySelectorAll('.ocr-uncertain').forEach(el=>el.classList.remove('ocr-uncertain'));
     const parsed=parseReceiptText(combined);
     if(scanImages.length){pendingPhoto=scanImages[0];window.pendingOcrPhotos=[...scanImages];}
-    scanWarnings.textContent=`OCR suggested ${parsed.fields.join(', ')||'no standard fields'} and ${parsed.taxCount} tax suggestion(s), plus ${parsed.itemCount} possible item(s). ${parsed.totalFromPayment?"Total was suggested from a payment line. ":""}${parsed.estimatedTax?"A possible tax was estimated from the difference; it is NOT verified printed tax. ":""}Verify every field, tax and item before saving. Never add a calculated tax estimate on top of a printed tax. Only the first photo is shown in older receipt views; all optimized photos are saved in the receipt record.`;
+    scanWarnings.textContent=`OCR suggested ${parsed.fields.join(', ')||'no standard fields'} and ${parsed.taxCount} tax suggestion(s), plus ${parsed.itemCount} possible item(s). ${parsed.uncertainItems?parsed.uncertainItems+" item match(es) need extra review. ":""}${parsed.totalFromPayment?"Total was suggested from a payment line. ":""}${parsed.estimatedTax?"A possible tax was estimated from the difference; it is NOT verified printed tax. ":""}Verify every field, tax and item before saving. Never add a calculated tax estimate on top of a printed tax. Only the first photo is shown in older receipt views; all optimized photos are saved in the receipt record.`;
     ocrStatus('Scan complete. Review highlighted fields and the receipt photo before saving.');
     form.scrollIntoView({behavior:'smooth',block:'start'});
   }catch(error){ocrStatus(`Scan failed: ${error.message}`);}
