@@ -80,13 +80,16 @@ function parseReceiptText(text) {
   const store=storeCandidates.sort((a,b)=>b.score-a.score)[0]?.cleaned||'';
   // Suggest only plausible WA street addresses from the receipt header.
   // This is unverified OCR text, never a confirmed tax jurisdiction.
-  const streetPattern=/\b\d{1,6}\s+(?:(?:[NSEW]|NE|NW|SE|SW)[ .]+)?[A-Za-z0-9 .'-]{2,55}\b(?:AVE(?:NUE)?|ST(?:REET)?|RD|ROAD|BLVD|DR(?:IVE)?|LN|LANE|WAY|CT|COURT|PL|PLACE|HWY|HIGHWAY)\b\.?/i;
-  const headerAddressLines=headerLines.slice(0,12);
-  const streetLine=headerAddressLines.find(line=>streetPattern.test(line));
-  const cityLine=headerAddressLines.find(line=>/\bWA\s*\d{5}(?:-\d{4})?\b/i.test(line));
+  // Normalize common OCR separators before matching; retain the original text for review.
+  const addressLines=headerLines.slice(0,14).map(line=>line
+    .replace(/_/g,' ').replace(/\s*\.\s*(?=(?:AVE|ST|RD|DR|LN|BLVD|WAY)\b)/gi,' ')
+    .replace(/\s+/g,' ').trim());
+  const streetPattern=/\b\d{1,6}\s+(?:(?:N|S|E|W|NE|NW|SE|SW)\s+)?(?:[A-Za-z0-9'-]+\s+){1,7}(?:AVE(?:NUE)?|ST(?:REET)?|RD|ROAD|BLVD|DR(?:IVE)?|LN|LANE|WAY|CT|COURT|PL|PLACE|HWY|HIGHWAY)\b\.?/i;
+  const streetLine=addressLines.find(line=>streetPattern.test(line));
+  const cityLine=addressLines.find(line=>/\bWA\s*\d{5}(?:-\d{4})?\b/i.test(line));
   let storeAddress='';
   if(streetLine){
-    const street=streetLine.match(streetPattern)?.[0]?.trim()||'';
+    const street=streetLine.match(streetPattern)?.[0]?.trim().replace(/\.$/,'')||'';
     const locality=cityLine?.match(/([A-Za-z][A-Za-z .'-]{1,40})[,\s]+WA\s*(\d{5}(?:-\d{4})?)/i);
     storeAddress=street+(locality?`, ${locality[1].trim()}, WA ${locality[2]}`:'');
   }
