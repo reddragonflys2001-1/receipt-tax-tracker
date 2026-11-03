@@ -46,6 +46,36 @@ async function receiptOcrBands(dataUrl) {
   }
   return bands;
 }
+// Enhance faint thermal-printer text for a second, independent OCR attempt.
+// Compare each band's original and enhanced OCR rather than concatenating both:
+// concatenation would double-count purchases printed in both versions.
+function enhanceReceiptBand(source) {
+  const canvas=document.createElement('canvas');
+  canvas.width=source.width;canvas.height=source.height;
+  const ctx=canvas.getContext('2d',{willReadFrequently:true});
+  ctx.drawImage(source,0,0);
+  const frame=ctx.getImageData(0,0,canvas.width,canvas.height);
+  const pixels=frame.data;
+  for(let i=0;i<pixels.length;i+=4){
+    const gray=Math.round(.299*pixels[i]+.587*pixels[i+1]+.114*pixels[i+2]);
+    // Moderate contrast stretch, not binary thresholding: retain thin digits.
+    const adjusted=Math.max(0,Math.min(255,Math.round((gray-128)*1.65+143)));
+    pixels[i]=adjusted;pixels[i+1]=adjusted;pixels[i+2]=adjusted;
+  }
+  ctx.putImageData(frame,0,0);
+  return canvas;
+}
+function receiptOcrItemScore(text){
+  const lines=text.split(/\r?\n/);
+  let scored=0;
+  for(const line of lines){
+    // Require a recognizable UPC AND a plausible price in the same line.
+    // Counts are only used to select the OCR image; they are not receipt data.
+    if(/\b\d[\d ]{8,17}\d\s+(?:[FNTO]\s+)?\$?\d{1,4}[.,]\d{2}\b/i.test(line))scored+=3;
+    else if(/\b\d{10,14}\b/.test(line))scored+=1;
+  }
+  return scored;
+}
 function renderScanImages() {
   scanPreview.replaceChildren();
   scanImages.forEach((src,index) => {
@@ -474,10 +504,19 @@ scanButton.addEventListener('click',async()=>{
         const bands=await receiptOcrBands(scanOcrImages[i]||scanImages[i]);
         for(let j=0;j<bands.length;j++){
           ocrStatus(`Scanning photo ${i+1}/${scanImages.length}, section ${j+1}/${bands.length}...`);
-          const result=await worker.recognize(bands[j]);
-          // Keep the original OCR text visible for review. Overlap can produce
-          // duplicate lines; never auto-certify extracted amounts.
-          texts.push(result.data.text||'');
+          const original=await worker.recognize(bands[j]);
+          const originalText=original.data.text||'';
+          let selectedText=originalText;
+          const enhanced=enhanceReceiptBand(bands[j]);
+          try {
+            ocrStatus(`Comparing enhanced text, photo ${i+1}/${scanImages.length}, section ${j+1}/${bands.length}...`);
+            const alternative=await worker.recognize(enhanced);
+            const alternativeText=alternative.data.text||'';
+            // Prefer the image that reads more complete UPC/price rows.
+            // Never concatenate both: it would duplicate receipt items.
+            if(receiptOcrItemScore(alternativeText)>receiptOcrItemScore(originalText))selectedText=alternativeText;
+          } finally {enhanced.width=0;enhanced.height=0;}
+          texts.push(selectedText);
           bands[j].width=0;bands[j].height=0;
         }
       }

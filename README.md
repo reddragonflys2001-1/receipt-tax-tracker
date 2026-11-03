@@ -20,3 +20,11 @@ IMPORTANT: OCR is not guaranteed to recognize all items. Always verify extracted
 - The receipt's printed item count is preserved for live row-count warnings.
 - OCR price recognition is not guaranteed accurate: compare all prices to the original image, especially BP XTR SRSRB.
 - The parser has **not** been trained to automatically correct $8.92 to $3.52, because doing so without evidence could corrupt other receipts.
+
+
+## Update 20: enhanced thermal receipt OCR
+- For each image band, OCR now compares the original with a contrast-enhanced grayscale version and uses whichever produces more UPC/price rows.
+- The two OCR results are **not** merged, preventing duplicate purchases from alternate passes.
+- Recognition will take longer (approximately two passes).
+- The 23-item Walmart result is a testing goal, not a guaranteed outcome; visually verify prices, item count, and totals.
+- Existing live reconciliation, tax handling and review warnings remain unchanged.
