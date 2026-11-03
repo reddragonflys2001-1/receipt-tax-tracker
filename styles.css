@@ -58,3 +58,13 @@ footer{text-align:center;color:var(--muted);padding:20px;font-size:.85rem}
 .ocr-item-source { grid-column: 1 / -1; width: 100%; min-width: 0; font-size: .85rem; }
 .ocr-item-source pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: .4rem 0; }
 .item-row input { min-width: 0; max-width: 100%; }
+
+/* Stage 6: item rows are readable in both narrow OCR review and full-page forms. */
+.item-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:end}
+.item-row > label{min-width:0;grid-column:auto}
+.item-row > label:first-child{grid-column:1/-1}
+.item-row > button{grid-column:1/-1}
+.item-row input{width:100%;min-width:0;max-width:100%}
+.item-row label:first-child input{width:100%}
+.item-row .ocr-item-source{grid-column:1/-1}
+@media(max-width:380px){.item-row{grid-template-columns:minmax(0,1fr)}.item-row > label,.item-row > button{grid-column:1/-1}}

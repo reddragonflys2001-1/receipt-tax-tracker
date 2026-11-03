@@ -141,19 +141,48 @@ function parseReceiptText(text) {
       .replace(/\bGROCK\b/gi,'GROCERY');
     return name.slice(0,110);
   }
-  // A receipt often prints description on one line, quantity and unit/line prices on the next.
-  for(let i=0;i<lines.length-1;i++){
-    const raw=lines[i],next=lines[i+1];
-    if(excluded.test(raw)||raw.length<8||!/[a-z]{3}/i.test(raw)||/\$\s*\d+[.,]\d{2}/.test(raw))continue;
-    const unitMatch=next.match(/\$\s*(\d+[.,]\d{2})\s*\/\s*(?:pc|ea)/i);
-    const price=amount(next);
-    if(!unitMatch||price===null)continue;
-    const unit=Number(unitMatch[1].replace(',','.'));
-    const qty=Math.round(price/unit);
-    if(!(unit>0&&qty>=1&&qty<=100&&Math.abs(qty*unit-price)<.04))continue;
+  // Prices can be on the next line, or one more line down when OCR
+  // separates the quantity from the unit price. Avoid treating header noise as items.
+  const productAnchors=/\b(?:MISC|NISC|GROCERY|CAYMAN|SPIRIT|FS\s+MISC)\b/i;
+  const pricePattern=/\$\s*(\d+[.,]\d{2})\s*\/\s*(?:pc|ea)\b/i;
+  const usedPriceLines=new Set();
+  for(let i=0;i<lines.length;i++){
+    const raw=lines[i];
+    if(excluded.test(raw) && !/taxable\s+grocery/i.test(raw))continue;
+    if(raw.length<8||!/\b[A-Za-z]{3,}\b/.test(raw)||/\$\s*\d+[.,]\d{2}/.test(raw))continue;
+    // On noisy scans the product label may contain a leading fragment.
+    // Require a recognizable product word or a plausible description.
+    if(!productAnchors.test(raw) && !/^[A-Z][A-Z\s-]{7,}/.test(raw))continue;
+    let candidate=null;
+    for(let offset=1;offset<=3 && i+offset<lines.length;offset++){
+      const j=i+offset;
+      if(usedPriceLines.has(j))continue;
+      const next=lines[j];
+      const unitMatch=next.match(pricePattern);
+      if(!unitMatch)continue;
+      const unit=Number(unitMatch[1].replace(',','.'));
+      // Some OCR outputs corrupt the line-total but retain the unit price.
+      // Prefer a valid amount at the end; otherwise use a nearby quantity.
+      const allAmounts=[...next.matchAll(/\$\s*(\d+[.,]\d{2})/g)].map(m=>Number(m[1].replace(',','.')));
+      const last=allAmounts.at(-1);
+      let qty=1,price=unit;
+      if(allAmounts.length>=2 && last>=unit && Math.abs(Math.round(last/unit)*unit-last)<.04){
+        qty=Math.round(last/unit);price=last;
+      } else {
+        const between=lines.slice(i+1,j+1).join(' ');
+        const explicit=between.match(/(?:^|\s)(\d{1,2})\s*(?:pc|ea)\b/i);
+        if(explicit){qty=Number(explicit[1]);price=Math.round(qty*unit*100)/100;}
+      }
+      if(qty<1||qty>100)continue;
+      candidate={j,qty,price};break;
+    }
+    if(!candidate)continue;
     const cleaned=cleanProductName(raw);
     if(cleaned.length<5)continue;
-    items.push({name:cleaned,qty,price,raw});i++;
+    // Never invent a name from the known example; keep ambiguous OCR for review.
+    items.push({name:cleaned,qty:candidate.qty,price:candidate.price,raw});
+    usedPriceLines.add(candidate.j);
+    i=candidate.j;
   }
   items.slice(0,30).forEach(item=>{
     addItem(item);
