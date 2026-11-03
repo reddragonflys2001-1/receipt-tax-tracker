@@ -1,2 +1,1 @@
-# receipt-tax-tracker
-Personal Receipt and Tax Tracker
+Stage 9 Update 13: Detect printed-tax labels even when OCR cannot read the amount. Suggest subtotal/total difference as unverified, require explicit classification before saving, and retain original OCR evidence. Existing receipts remain unchanged.\n

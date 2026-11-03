@@ -305,7 +305,7 @@ function addTax(data = {}) {
     <label>Amount ($)<input data-key="amount" type="number" min="0" step="0.01" placeholder="0.00" value="${escapeHtml(data.amount ?? '')}"></label>
     <label>Tax type<select data-key="taxType">${TAX_TYPES.map(t => `<option ${t === type ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}</select></label>
     <label>Jurisdiction<input data-key="jurisdiction" placeholder="Washington / Seattle" value="${escapeHtml(data.jurisdiction || '')}"></label>
-    <label>Recorded as<select data-key="source"><option ${source === 'Printed on receipt' ? 'selected' : ''}>Printed on receipt</option><option ${source === 'Calculated estimate' ? 'selected' : ''}>Calculated estimate</option></select></label>
+    <label>Recorded as<select data-key="source"><option ${source === 'Printed on receipt' ? 'selected' : ''}>Printed on receipt</option><option ${source === 'Calculated estimate' ? 'selected' : ''}>Calculated estimate</option><option ${source === 'Needs review (OCR suggestion)' ? 'selected' : ''}>Needs review (OCR suggestion)</option></select></label>
     <button type="button" class="secondary">Remove</button>`;
   row.querySelector('button').addEventListener('click', () => row.remove());
   taxesBox.append(row);
@@ -347,6 +347,10 @@ form.elements.photo.addEventListener('change', event => {
 
 form.addEventListener('submit', event => {
   event.preventDefault();
+  if ([...taxesBox.querySelectorAll('.tax-row')].some(row=>row.querySelector('[data-key="source"]')?.value==='Needs review (OCR suggestion)')) {
+    alert('Review the OCR tax suggestion before saving. Compare the printed receipt photo, then choose Printed on receipt or Calculated estimate in Recorded as. The difference alone does not prove printed tax.');
+    return;
+  }
   const data = new FormData(form);
   const oldRecord = editId ? receipts.find(receipt => receipt.id === editId) : null;
   const record = {

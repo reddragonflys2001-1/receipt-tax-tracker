@@ -129,10 +129,21 @@ function parseReceiptText(text) {
   if(total===null){const candidate=paymentCandidates.find(v=>subtotal===null||v>=subtotal);if(candidate!==undefined){total=candidate;totalFromPayment=true;}}
   // A bare rate/amount pair is only accepted if it reconciles with the subtotal and total.
   if(total!==null&&subtotal!==null){const delta=Math.round((total-subtotal)*100)/100;uniqueTaxes=uniqueTaxes.filter(t=>!t.name.includes('printed rate')||Math.abs(t.amount-delta)<.02);}
+  // A recognizable printed tax label is evidence of a tax line even when OCR
+  // garbles the amount. Never silently certify the arithmetic difference as printed.
+  const printedTaxLabel=lines.find(line=>
+    /\b(?:washington\s*\(?\s*included\s*\)?|wa\s*tax|sales\s*tax|tax\s*(?:amount|total|due))\b/i.test(line)
+    && !/tax exempt|tax id|taxable grocery|taxable item/i.test(line));
   // If OCR missed the tax label, only infer a tax amount when a printed payment and subtotal reconcile.
   if(!uniqueTaxes.length&&total!==null&&subtotal!==null){
     const difference=Math.round((total-subtotal)*100)/100;
-    if(difference>0&&difference<=subtotal*.2)uniqueTaxes.push({name:'Possible sales tax (calculated difference — verify)',amount:difference,source:'Calculated estimate'});
+    if(difference>0&&difference<=subtotal*.2){
+      if(printedTaxLabel){
+        uniqueTaxes.push({name:'Possible printed sales tax — verify OCR amount',amount:difference,source:'Needs review (OCR suggestion)',ocrEvidence:printedTaxLabel});
+      }else{
+        uniqueTaxes.push({name:'Possible sales tax (calculated difference — verify)',amount:difference,source:'Calculated estimate'});
+      }
+    }
   }
   reviewField('store',store||'',true);reviewField('storeAddress',storeAddress,true);reviewField('date',date,true);
   reviewField('subtotal',subtotal!==null?money(subtotal):'',true);
@@ -147,7 +158,17 @@ function parseReceiptText(text) {
       if(!name && (!value || Number(value)===0) && !row.dataset.autoFuelTax)row.remove();
     });
   }
-  uniqueTaxes.slice(0,8).forEach(t=>{addTax({...t,taxType:'Other tax'});taxesBox.lastElementChild.dataset.ocrSuggestion='true';});
+  uniqueTaxes.slice(0,8).forEach(t=>{
+    addTax({...t,taxType:'Other tax'});
+    const row=taxesBox.lastElementChild;
+    row.dataset.ocrSuggestion='true';
+    if(t.ocrEvidence){
+      const note=document.createElement('p');
+      note.className='ocr-match-warning';
+      note.textContent=`OCR detected a printed tax label: "${t.ocrEvidence}". The $${money(t.amount)} amount comes from total minus subtotal, NOT a readable tax amount. Compare the photo and select "Printed on receipt" only if confirmed, or "Calculated estimate" otherwise. You must choose before saving.`;
+      row.append(note);
+    }
+  });
   // Keep original OCR beside editable suggestions; do not silently invent missing words.
   itemsBox.querySelectorAll('.item-row[data-ocr-suggestion]').forEach(row=>row.remove());
   const items=[];
@@ -187,7 +208,7 @@ function parseReceiptText(text) {
     let candidate=null;
     for(let offset=1;offset<=3 && i+offset<lines.length;offset++){
       const j=i+offset;
-      if(productHeading(lines[j]))break; // never borrow a later item's price
+      if(productHeading(lines[j]) || /(?:^|\s)\d{1,2}\s*[-–]\s*[A-Za-z]/.test(lines[j]))break; // never borrow a later item's price
       if(usedPriceLines.has(j))continue;
       const next=lines[j];
       const allAmounts=[...next.matchAll(/\$\s*(\d+[.,]\d{2})/g)].map(m=>Number(m[1].replace(',','.')));
@@ -227,6 +248,13 @@ function parseReceiptText(text) {
   const itemStop=/\b(?:subtotal|grand\s*total|total|tax|cashier|station|invoice|date|time|credit|debit|payment|balance|change|phone|transaction|receipt|amount\s*due|authorization)\b/i;
   const existingSources=new Set(items.map(x=>x.raw));
   const pendingDiscounts=[];
+  // OCR can put noise before the quantity marker, and omit decimal points in prices.
+  function normalizeOcrItemName(value){
+    return value.replace(/\bCriginal\b/gi,'Original')
+      .replace(/\b(20[0o]z|200z)\b/gi,'20 oz')
+      .replace(/\bEmployes\b/gi,'Employee')
+      .replace(/[|§*’]+/g,' ').replace(/\s+/g,' ').trim();
+  }
   for(const raw of lines){
     if(existingSources.has(raw)||itemStop.test(raw))continue;
     // Quantity prefix can be preceded by short OCR artifacts, e.g. "mt 1 -".
@@ -259,7 +287,7 @@ function parseReceiptText(text) {
       else {pendingDiscounts.push({raw,body,qty});continue;}
     }
     if(price===null||!Number.isFinite(price)||Math.abs(price)>100000||price===0)continue;
-    let name=(priceStart>=0?body.slice(0,priceStart):body).replace(/\s+\d+(?:[.,]\d+)?\s*$/,'').replace(/[|§*]+/g,' ').replace(/\s+/g,' ').trim();
+    let name=normalizeOcrItemName((priceStart>=0?body.slice(0,priceStart):body).replace(/\s+\d+(?:[.,]\d+)?\s*$/,''));
     if(name.length<4||!/[A-Za-z]{3}/.test(name)||/\b(?:washington|included|taxable|change|cash)\b/i.test(name))continue;
     items.push({name:name.slice(0,110),qty,price,raw,priceText:raw,uncertain:uncertain||/\b(?:criginal|200z|employes)\b/i.test(raw)});
     existingSources.add(raw);
@@ -270,7 +298,7 @@ function parseReceiptText(text) {
     const current=items.reduce((sum,item)=>sum+item.qty*item.price,0);
     const needed=Math.round((subtotal-current)*100)/100;
     const candidate=pendingDiscounts[0];
-    if(needed<0 && Math.abs(needed)<=current && /\(\s*[8$]?\d+[.,]\d{2}\s*\)/.test(candidate.body)){
+    if(needed<0 && Math.abs(needed)<=current && /\(\s*[$8]?\d+[.,]\d{2}\s*\)/.test(candidate.body)){
       items.push({name:'Employee discount (verify OCR)',qty:1,price:needed,raw:candidate.raw,priceText:'Amount inferred from printed subtotal; VERIFY original discount',uncertain:true});
     }
   }
@@ -295,7 +323,7 @@ function parseReceiptText(text) {
     details.append(summary,original);row.append(details);
     if(item.uncertain){const note=document.createElement('p');note.className='ocr-match-warning';note.textContent='Review this match: OCR could not fully verify the description or quantity against the price.';row.append(note);}
   });
-  return {itemReconciliationWarning:items.length && subtotal!==null && Math.abs(itemSum-subtotal)>0.02 ? ` Item suggestions total $${itemSum.toFixed(2)} versus printed subtotal $${subtotal.toFixed(2)}; review missing items and discounts.` : '',fields:[store&&'Store',date&&'Date',total!==null&&'Total',subtotal!==null&&'Subtotal'].filter(Boolean),taxCount:uniqueTaxes.length,itemCount:items.length,uncertainItems:items.filter(x=>x.uncertain).length,totalFromPayment,estimatedTax:uniqueTaxes.some(t=>t.source==='Calculated estimate')};
+  return {itemReconciliationWarning:items.length && subtotal!==null && Math.abs(itemSum-subtotal)>0.02 ? ` Item suggestions total $${itemSum.toFixed(2)} versus printed subtotal $${subtotal.toFixed(2)}; review missing items and discounts.` : '',fields:[store&&'Store',date&&'Date',total!==null&&'Total',subtotal!==null&&'Subtotal'].filter(Boolean),taxCount:uniqueTaxes.length,itemCount:items.length,uncertainItems:items.filter(x=>x.uncertain).length,totalFromPayment,estimatedTax:uniqueTaxes.some(t=>t.source==='Calculated estimate'),pendingTaxReview:uniqueTaxes.some(t=>t.source==='Needs review (OCR suggestion)')};
 }
 scanButton.addEventListener('click',async()=>{
   if(!scanImages.length)return;
@@ -312,7 +340,7 @@ scanButton.addEventListener('click',async()=>{
     document.querySelectorAll('.ocr-uncertain').forEach(el=>el.classList.remove('ocr-uncertain'));
     const parsed=parseReceiptText(combined);
     if(scanImages.length){pendingPhoto=scanImages[0];window.pendingOcrPhotos=[...scanImages];}
-    scanWarnings.textContent=`OCR suggested ${parsed.fields.join(', ')||'no standard fields'} and ${parsed.taxCount} tax suggestion(s), plus ${parsed.itemCount} possible item(s). ${parsed.uncertainItems?parsed.uncertainItems+" item match(es) need extra review. ":""}${parsed.totalFromPayment?"Total was suggested from a payment line. ":""}${parsed.itemReconciliationWarning||''}${parsed.itemCount===0?' No products were extracted: check OCR product lines and review manually. ':''}${parsed.estimatedTax?"A possible tax was estimated from the difference; it is NOT verified printed tax. ":""}Verify every field, tax and item before saving. Never add a calculated tax estimate on top of a printed tax. Only the first photo is shown in older receipt views; all optimized photos are saved in the receipt record.`;
+    scanWarnings.textContent=`OCR suggested ${parsed.fields.join(', ')||'no standard fields'} and ${parsed.taxCount} tax suggestion(s), plus ${parsed.itemCount} possible item(s). ${parsed.uncertainItems?parsed.uncertainItems+" item match(es) need extra review. ":""}${parsed.totalFromPayment?"Total was suggested from a payment line. ":""}${parsed.itemReconciliationWarning||''}${parsed.itemCount===0?' No products were extracted: check OCR product lines and review manually. ':''}${parsed.estimatedTax?"A possible tax was estimated from the difference; it is NOT verified printed tax. ":""}${parsed.pendingTaxReview?"A printed tax label was detected but the amount was unreadable. Review and classify the suggested amount before saving. ":""}Verify every field, tax and item before saving. Never add a calculated tax estimate on top of a printed tax. Only the first photo is shown in older receipt views; all optimized photos are saved in the receipt record.`;
     ocrStatus('Scan complete. Review highlighted fields and the receipt photo before saving.');
     document.dispatchEvent(new Event('receipt-ocr-complete'));
     form.scrollIntoView({behavior:'smooth',block:'start'});
