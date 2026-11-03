@@ -68,3 +68,46 @@ footer{text-align:center;color:var(--muted);padding:20px;font-size:.85rem}
 .item-row label:first-child input{width:100%}
 .item-row .ocr-item-source{grid-column:1/-1}
 @media(max-width:380px){.item-row{grid-template-columns:minmax(0,1fr)}.item-row > label,.item-row > button{grid-column:1/-1}}
+
+/* Stage 7: product editor is responsive to its actual available width.
+   Always give descriptions a full row, even in the narrow OCR review pane. */
+.line-row.item-row {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+  align-items:start;
+  min-width:0;
+  width:100%;
+  overflow-wrap:anywhere;
+}
+.line-row.item-row > label {
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  gap:6px;
+  min-width:0;
+  width:100%;
+  grid-column:auto;
+  line-height:1.35;
+}
+.line-row.item-row > label:first-child {grid-column:1 / -1;}
+.line-row.item-row > label input {
+  display:block;
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+}
+.line-row.item-row > button {
+  grid-column:1 / -1;
+  justify-self:end;
+  width:auto;
+  max-width:100%;
+}
+.line-row.item-row > .ocr-item-source {grid-column:1 / -1;min-width:0;}
+/* Tiny review panes: avoid squeezing two numeric controls into unreadable widths. */
+@container (max-width: 260px) {
+  .line-row.item-row {grid-template-columns:minmax(0,1fr);}
+  .line-row.item-row > label {grid-column:1 / -1;}
+}
+#items-container {container-type:inline-size;min-width:0;max-width:100%;}
