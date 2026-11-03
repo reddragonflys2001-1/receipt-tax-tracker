@@ -169,6 +169,7 @@ form.addEventListener('submit', event => {
   const record = {
     id: editId || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
     store: String(data.get('store') || '').trim(),
+    storeAddress: String(data.get('storeAddress') || '').trim(),
     date: String(data.get('date') || ''),
     category: String(data.get('category') || ''),
     total: Number(data.get('total') || 0),
@@ -236,7 +237,7 @@ function renderReceipts() {
   }
   receiptsList.innerHTML = filtered.map(r => `
     <article class="receipt-card">
-      <div class="receipt-top"><strong>${escapeHtml(r.store)}</strong><strong>$${money(r.total)}</strong></div>
+      <div class="receipt-top"><strong>${escapeHtml(r.store)}</strong><strong>$${money(r.total)}</strong></div>${r.storeAddress ? `<div class="hint">Store address: ${escapeHtml(r.storeAddress)}</div>` : ''}
       <div class="receipt-meta">${escapeHtml(r.date)} · ${escapeHtml(r.category)}</div>
       <div class="tax-summary">${(r.taxes || []).length} tax line(s) · ${(r.items || []).length} item(s)${r.gallons !== '' && r.gallons != null ? ` · ${escapeHtml(r.gallons)} gal ${escapeHtml(r.fuelType)}` : ''}</div>
       <details><summary>Details, taxes and notes</summary>
@@ -261,6 +262,7 @@ function editReceipt(id) {
   if (!receipt) return;
   editId = id;
   form.elements.store.value = receipt.store || '';
+  form.elements.storeAddress.value = receipt.storeAddress || '';
   form.elements.date.value = receipt.date || '';
   form.elements.category.value = receipt.category || 'Other';
   form.elements.total.value = receipt.total ?? '';

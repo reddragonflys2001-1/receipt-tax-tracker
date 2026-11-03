@@ -78,6 +78,18 @@ function parseReceiptText(text) {
     return {cleaned,score,letters,words};
   }).filter(v=>v.letters>=7&&v.words.length>=2);
   const store=storeCandidates.sort((a,b)=>b.score-a.score)[0]?.cleaned||'';
+  // Suggest only plausible WA street addresses from the receipt header.
+  // This is unverified OCR text, never a confirmed tax jurisdiction.
+  const streetPattern=/\b\d{1,6}\s+(?:(?:[NSEW]|NE|NW|SE|SW)[ .]+)?[A-Za-z0-9 .'-]{2,55}\b(?:AVE(?:NUE)?|ST(?:REET)?|RD|ROAD|BLVD|DR(?:IVE)?|LN|LANE|WAY|CT|COURT|PL|PLACE|HWY|HIGHWAY)\b\.?/i;
+  const headerAddressLines=headerLines.slice(0,12);
+  const streetLine=headerAddressLines.find(line=>streetPattern.test(line));
+  const cityLine=headerAddressLines.find(line=>/\bWA\s*\d{5}(?:-\d{4})?\b/i.test(line));
+  let storeAddress='';
+  if(streetLine){
+    const street=streetLine.match(streetPattern)?.[0]?.trim()||'';
+    const locality=cityLine?.match(/([A-Za-z][A-Za-z .'-]{1,40})[,\s]+WA\s*(\d{5}(?:-\d{4})?)/i);
+    storeAddress=street+(locality?`, ${locality[1].trim()}, WA ${locality[2]}`:'');
+  }
   const totalCandidates=lines.filter(x=>/\b(grand\s*total|total|amount due|balance due)\b/i.test(x)&&!/subtotal|tax|savings/i.test(x)).map(amount).filter(x=>x!==null);
   const paymentCandidates=lines.filter(x=>/\b(debit card|credit card|card purchase|visa|mastercard|amount paid)\b/i.test(x)).map(amount).filter(x=>x!==null);
   const taxCandidates=[];
@@ -109,7 +121,7 @@ function parseReceiptText(text) {
     const difference=Math.round((total-subtotal)*100)/100;
     if(difference>0&&difference<=subtotal*.2)uniqueTaxes.push({name:'Possible sales tax (calculated difference — verify)',amount:difference,source:'Calculated estimate'});
   }
-  reviewField('store',store||'',true);reviewField('date',date,true);
+  reviewField('store',store||'',true);reviewField('storeAddress',storeAddress,true);reviewField('date',date,true);
   reviewField('subtotal',subtotal!==null?money(subtotal):'',true);
   reviewField('total',total!==null?money(total):'',true);
   // Avoid duplicating taxes when rescanning; preserve manually entered tax rows.

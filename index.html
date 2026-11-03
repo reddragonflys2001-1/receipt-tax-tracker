@@ -37,6 +37,7 @@
 <form id="receipt-form">
 <div class="grid">
 <label>Store name<input name="store" required placeholder="Store or merchant"></label>
+<label>Store address (review OCR suggestion)<input name="storeAddress" placeholder="Street address, city, WA ZIP" autocomplete="off"></label>
 <label>Purchase date<input name="date" type="date" required></label>
 <label>Category<select name="category"><option>Grocery and household</option><option>Retail purchases</option><option>Restaurant and food</option><option>Gas and vehicle</option><option>Home improvement</option><option>Work or business expenses</option><option>Utilities and bills</option><option>Medical and pharmacy</option><option>Other</option></select></label>
 <label>Receipt total ($)<input name="total" type="number" min="0" step="0.01" required placeholder="0.00"></label>
