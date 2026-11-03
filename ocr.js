@@ -450,7 +450,7 @@ function parseReceiptText(text) {
     walmartParsedItems=walmartItems;
     const walmartSum=walmartItems.reduce((a,x)=>a+x.price,0);
     const walmartSold=Number(text.match(/items\s+sold\s*:?\s*(\d+)/i)?.[1]||0);
-    const genericSum=items.reduce((a,x)=>a+x.qty*x.price,0);
+    const genericSum=items.reduce((a,x)=>a+x.qty*(x.price === '' ? 0 : x.price),0);
     const betterCount=walmartItems.length>items.length;
     const betterSubtotal=subtotal!==null && Math.abs(walmartSum-subtotal)<Math.abs(genericSum-subtotal)-0.02;
     if(walmartItems.length && (betterCount||betterSubtotal)){
@@ -527,16 +527,38 @@ function parseReceiptText(text) {
   // modify a price to force reconciliation.
   if(walmartParsedItems.length){
     const upcSum=walmartParsedItems.reduce((a,x)=>a+x.price,0);
-    const generalSum=items.reduce((a,x)=>a+x.qty*x.price,0);
+    const generalSum=items.reduce((a,x)=>a+x.qty*(x.price === '' ? 0 : x.price),0);
     const closer=subtotal!==null && Math.abs(upcSum-subtotal)+0.02<Math.abs(generalSum-subtotal);
     if(walmartParsedItems.length>items.length || (walmartParsedItems.length===items.length && closer)){
       items.splice(0,items.length,...walmartParsedItems);
     }
   }
+  // Preserve named product lines when OCR loses the price. Never guess an amount.
+  const recoveryStart=lines.findIndex(x=>/items\s+sold\s*:?\s*\d+/i.test(x));
+  const recoveryEnd=lines.findIndex((x,i)=>i>recoveryStart && /\b(?:subtotal|subt[o0]tal|tax\s*[1Il]|debit\s+tend)\b/i.test(x));
+  if(recoveryStart>=0){
+    const region=lines.slice(recoveryStart+1,recoveryEnd>recoveryStart?recoveryEnd:undefined);
+    const key=name=>name.toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/ROX/g,'BOX');
+    for(const raw of region){
+      if(items.some(x=>x.raw===raw))continue;
+      if(/\b(?:subtotal|tax|total|debit|credit|change|tend|items sold|tc#)\b/i.test(raw))continue;
+      let name='';
+      const upc=raw.match(/\b\d[\d ]{9,16}\d\b/);
+      if(upc) name=raw.slice(0,upc.index).replace(/^[^A-Za-z]+/,'').trim();
+      else {
+        const bare=raw.replace(/^[^A-Za-z]+/,'').trim();
+        if(/^[A-Za-z][A-Za-z0-9 ]{5,45}$/.test(bare) && items.some(x=>key(x.name)===key(bare)))name=bare;
+      }
+      name=name.replace(/^(?:(?:SN|SS|SNS|Wa|Ne|Bi|aN|bo|eh|pl|EL|Xu|J)\s+){1,3}/i,'').replace(/\s+/g,' ').trim();
+      if(name.length<5||!/[A-Za-z]{3}/.test(name))continue;
+      items.push({name:name.slice(0,110),qty:1,price:'',raw,
+        priceText:'Price unreadable — enter amount from original receipt',uncertain:true,missingPrice:true});
+    }
+  }
   // Only recover a corrupted discount if it makes the extracted item values
   // reconcile exactly with a clearly printed subtotal. Always mark uncertain.
   if(pendingDiscounts.length===1 && subtotal!==null){
-    const current=items.reduce((sum,item)=>sum+item.qty*item.price,0);
+    const current=items.reduce((sum,item)=>sum+item.qty*(item.price === '' ? 0 : item.price),0);
     const needed=Math.round((subtotal-current)*100)/100;
     const candidate=pendingDiscounts[0];
     if(needed<0 && Math.abs(needed)<=current && /\(\s*[$8]?\d+[.,]\d{2}\s*\)/.test(candidate.body)){
@@ -545,7 +567,7 @@ function parseReceiptText(text) {
   }
   // Itemized lines are suggestions; warn if they do not reconcile with the
   // printed subtotal (which may legitimately exclude included taxes/discounts).
-  const itemSum=items.reduce((sum,item)=>sum+item.qty*item.price,0);
+  const itemSum=items.reduce((sum,item)=>sum+item.qty*(item.price === '' ? 0 : item.price),0);
   if(items.length && subtotal!==null && Math.abs(itemSum-subtotal)>0.02){
     const warning=document.createElement('p');
     warning.className='ocr-match-warning';
@@ -562,7 +584,8 @@ function parseReceiptText(text) {
     const summary=document.createElement('summary');summary.textContent='Original OCR product text — compare before saving';
     const original=document.createElement('pre');original.textContent='Description: '+item.raw+'\nPrice line: '+item.priceText;
     details.append(summary,original);row.append(details);
-    if(item.uncertain){const note=document.createElement('p');note.className='ocr-match-warning';note.textContent='Review this match: OCR could not fully verify the description or quantity against the price.';row.append(note);}
+    if(item.missingPrice){row.dataset.reviewNeeded='true';row.querySelector('[data-key="price"]').classList.add('ocr-uncertain');}
+    if(item.uncertain){const note=document.createElement('p');note.className='ocr-match-warning';note.textContent=item.missingPrice?'NEEDS PRICE REVIEW: Enter the missing price from the original receipt.':'Review this match: OCR could not fully verify the description or quantity against the price.';row.append(note);}
   });
   itemsBox.querySelectorAll('[data-ocr-count-warning]').forEach(el=>el.remove());
   const soldLine=lines.find(line=>/#?\s*items\s+sold\s*:?\s*\d+/i.test(line));
