@@ -51,6 +51,8 @@
 <p class="hint">Use the official Department of Revenue lookup to verify the tax location and historical rate for the purchase date. This version checks address completeness before you open the official lookup; it does not automatically retrieve DOR results. Enter only verified information; leave fields blank if unknown.</p>
 <div class="actions"><button type="button" class="secondary" id="wa-check-address">Check store address</button><a id="wa-official-link" hidden href="https://webgis.dor.wa.gov/taxratelookup/salestax.aspx" target="_blank" rel="noopener noreferrer">Open official WA tax lookup</a> <a href="https://dor.wa.gov/taxes-rates/sales-use-tax-rates/downloadable-database" target="_blank" rel="noopener noreferrer">Historical quarterly data</a></div>
 <p id="wa-address-status" class="hint" aria-live="polite">Check the store address before opening the official tax lookup. A complete address is not proof of the correct jurisdiction.</p>
+<div class="actions"><button type="button" class="secondary" id="wa-test-access">Test browser access to WA DOR</button></div>
+<p id="wa-access-status" class="hint" aria-live="polite">This checks whether the official DOR page can be read by this browser app. It does not retrieve or verify tax rates.</p>
 <div class="grid">
 <label>Tax location / jurisdiction (verified)<input name="waTaxJurisdiction" placeholder="e.g. Yacolt" autocomplete="off"></label>
 <label>WA tax location code (if available)<input name="waTaxCode" placeholder="DOR location code" autocomplete="off"></label>

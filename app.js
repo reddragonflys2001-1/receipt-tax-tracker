@@ -73,6 +73,43 @@ function checkWaAddress() {
   return result.ok;
 }
 document.querySelector('#wa-check-address').addEventListener('click', checkWaAddress);
+
+// Diagnostic only: test cross-origin read access from GitHub Pages. No rate lookup or saved data changes.
+document.querySelector('#wa-test-access').addEventListener('click', async () => {
+  const status = document.querySelector('#wa-access-status');
+  const button = document.querySelector('#wa-test-access');
+  if (!checkWaAddress()) {
+    status.textContent = 'Please correct and check the store address first. No request was sent.';
+    status.classList.add('error');
+    return;
+  }
+  button.disabled = true;
+  status.classList.remove('error');
+  status.textContent = 'Testing whether this browser can read the official DOR page…';
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch('https://webgis.dor.wa.gov/taxratelookup/salestax.aspx', {
+      method: 'GET', mode: 'cors', cache: 'no-store', signal: controller.signal
+    });
+    if (!response.ok) {
+      status.textContent = `DOR responded with HTTP ${response.status}. This test did not retrieve a tax rate. We may need downloadable historical data.`;
+      status.classList.add('error');
+    } else {
+      await response.text();
+      status.textContent = 'Browser can read this DOR web page. This does NOT confirm that the tax-rate API supports browser requests or historical lookups. No rate was retrieved.';
+    }
+  } catch (error) {
+    status.textContent = error.name === 'AbortError'
+      ? 'Connection test timed out. No tax rate was retrieved.'
+      : 'Browser could not read the DOR page directly (possibly cross-origin restrictions or a network issue). The official lookup link can still work in a separate tab. No tax rate was retrieved.';
+    status.classList.add('error');
+  } finally {
+    clearTimeout(timeout);
+    button.disabled = false;
+  }
+});
+
 form.elements.storeAddress.addEventListener('input', () => {
   document.querySelector('#wa-official-link').hidden = true;
   document.querySelector('#wa-address-status').textContent = 'Address changed. Check it again before opening the tax lookup.';
