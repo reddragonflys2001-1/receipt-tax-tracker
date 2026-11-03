@@ -354,16 +354,18 @@ function parseReceiptText(text) {
     items.push({name:name.slice(0,110),qty,price,raw,priceText:raw,uncertain:uncertain||/\b(?:criginal|200z|employes)\b/i.test(raw)});
     existingSources.add(raw);
   }
-  // Walmart-style rows: DESCRIPTION + UPC + price + optional taxable marker.
-  // Keep repeated identical products as separate rows; UPCs are never prices.
+  // Walmart UPC and price rows may have OCR debris before and after the values.
+  // Preserve duplicates, but never invent an unreadable price.
   const knownItemLines=new Set(items.map(item=>item.raw));
   for(const raw of lines){
     if(knownItemLines.has(raw)||itemStop.test(raw)||/items sold|survey|walmart|supercenter|manager|mgr\./i.test(raw))continue;
-    const m=raw.match(/^\W*(.{2,75}?)\s+(\d{8,14})\s+(?:[FNTO]\s+)?\$?\s*(\d{1,4}[.,]\d{2})\s*(?:[XNFTO])?\s*$/i);
-    if(!m)continue;
-    let name=m[1].replace(/^[^A-Za-z]+/,'').replace(/[|§]+/g,' ').replace(/\s+/g,' ').trim();
-    name=name.replace(/^(?:[A-Z]{1,2}\s+)+(?=[A-Z]{2,})/,'').trim();
-    const price=Number(m[3].replace(',','.'));
+    const matches=[...raw.matchAll(/(?:^|\s)(\d(?:[\d\s]{6,17}\d))\s+(?:[FNTO]\s+)?\$?\s*(\d{1,4}[.,]\d{2})(?!\d)/gi)];
+    if(!matches.length)continue;
+    const m=matches[0], upc=m[1].replace(/\s/g,'');
+    if(upc.length<8||upc.length>14)continue;
+    let name=raw.slice(0,m.index).replace(/^[^A-Za-z]+/,'').replace(/[|§]+/g,' ').replace(/\s+/g,' ').trim();
+    name=name.replace(/^(?:(?:SN|SS|SNS|Wa|Ne|Bi|aN|bo|eh|pl|EL)\s+){1,3}/i,'').trim();
+    const price=Number(m[2].replace(',','.'));
     if(name.length<3||!/[A-Za-z]{3}/.test(name)||!Number.isFinite(price)||price<=0||price>10000)continue;
     items.push({name:name.slice(0,110),qty:1,price,raw,priceText:raw,uncertain:true});
     knownItemLines.add(raw);
@@ -399,8 +401,17 @@ function parseReceiptText(text) {
     details.append(summary,original);row.append(details);
     if(item.uncertain){const note=document.createElement('p');note.className='ocr-match-warning';note.textContent='Review this match: OCR could not fully verify the description or quantity against the price.';row.append(note);}
   });
+  itemsBox.querySelectorAll('[data-ocr-count-warning]').forEach(el=>el.remove());
   const soldLine=lines.find(line=>/#?\s*items\s+sold\s*:?\s*\d+/i.test(line));
   const soldCount=soldLine?Number(soldLine.match(/items\s+sold\s*:?\s*(\d+)/i)?.[1]||0):0;
+  if(soldCount>0 && items.length<soldCount){
+    const warning=document.createElement('p');
+    warning.className='ocr-match-warning';
+    warning.dataset.ocrCountWarning='true';
+    warning.setAttribute('role','alert');
+    warning.textContent=`INCOMPLETE PRODUCT LIST: Receipt says ${soldCount} items sold, but OCR extracted only ${items.length} product rows. Check the original receipt; do not save this list as complete.`;
+    itemsBox.prepend(warning);
+  }
   return {soldCount,itemReconciliationWarning:items.length && subtotal!==null && Math.abs(itemSum-subtotal)>0.02 ? ` Item suggestions total $${itemSum.toFixed(2)} versus printed subtotal $${subtotal.toFixed(2)}; review missing items and discounts.` : '',fields:[store&&'Store',date&&'Date',total!==null&&'Total',subtotal!==null&&'Subtotal'].filter(Boolean),taxCount:uniqueTaxes.length,itemCount:items.length,uncertainItems:items.filter(x=>x.uncertain).length,totalFromPayment,estimatedTax:uniqueTaxes.some(t=>t.source==='Calculated estimate'),pendingTaxReview:uniqueTaxes.some(t=>t.source==='Needs review (OCR suggestion)'),subtotalInferred};
 }
 scanButton.addEventListener('click',async()=>{
