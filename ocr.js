@@ -63,43 +63,53 @@ function parseReceiptText(text) {
   const subtotal=subtotalLine?amount(subtotalLine):null;
   const dateMatch=text.match(/\b(20\d{2})[-\/.](\d{1,2})[-\/.](\d{1,2})\b|\b(\d{1,2})[\/.-](\d{1,2})[\/.-](20\d{2})\b/);
   let date='';if(dateMatch){const y=dateMatch[1]||dateMatch[6],m=dateMatch[2]||dateMatch[4],d=dateMatch[3]||dateMatch[5];date=`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;}
-  // Score merchant headings, rejecting OCR debris and address/transaction lines.
-  const headerLines=lines.slice(0,Math.min(lines.length,18));
-  const storeCandidates=headerLines.map((line,index)=>{
-    const cleaned=line.replace(/^[^A-Za-z0-9]+/, '').trim();
+  // Merchant headings are generally at the very top, before address and transaction details.
+  // Single-word headings (GOODWILL, TARGET) are valid. Do not promote a cashier/customer
+  // name from later in the receipt just because it contains more words.
+  const headerLines=lines.slice(0,Math.min(lines.length,20));
+  const merchantStop=/\b(?:receipt|thank|welcome|invoice|order|cashier|station|date|time|closed|phone|tel|debit|credit|card|subtotal|total|purchase|customer|employee|discount|item|sale|transaction|register|associate)\b/i;
+  const merchantAddress=/\b(?:ave|avenue|street|st|road|rd|blvd|drive|dr|lane|ln|way|ct|court|place|pl|hwy|highway|wa|zip)\b|\d{3,}/i;
+  const merchantBoundary=headerLines.findIndex(x=>merchantAddress.test(x)||merchantStop.test(x));
+  const headingLines=headerLines.slice(0,merchantBoundary>0?merchantBoundary:Math.min(6,headerLines.length));
+  const storeCandidates=headingLines.map((line,index)=>{
+    const cleaned=line.replace(/^[^A-Za-z]+/,'').replace(/[^A-Za-z0-9 '&.-]+$/,'').trim();
     const words=cleaned.split(/\s+/).filter(w=>/^[A-Za-z][A-Za-z'-]{2,}$/.test(w));
     const letters=(cleaned.match(/[A-Za-z]/g)||[]).length;
-    const noise=(cleaned.match(/[^A-Za-z0-9 \'&.-]/g)||[]).length;
-    const excluded=/\b(receipt|thank|welcome|invoice|order|cashier|station|date|time|closed|phone|tel|debit|card|subtotal|total|purchase|item count)\b/i.test(cleaned);
-    const address=/\d{3,}|\b(?:ave|street|st|road|rd|blvd|wa|zip)\b|\b\d+\s+[NSEW]\b/i.test(cleaned);
+    const noise=(cleaned.match(/[^A-Za-z0-9 '&.-]/g)||[]).length;
     const uppercase=(cleaned.match(/[A-Z]/g)||[]).length/Math.max(letters,1);
-    const shortWords=cleaned.split(/\s+/).filter(w=>/^[A-Za-z]{1,2}$/.test(w)).length;
-    const score=words.length*9+letters*.3+uppercase*8-noise*8-shortWords*7-(excluded?50:0)-(address?50:0)-(index*.4);
-    return {cleaned,score,letters,words};
-  }).filter(v=>v.letters>=7&&v.words.length>=2);
+    const valid=!merchantStop.test(cleaned)&&!merchantAddress.test(cleaned)&&letters>=4&&words.length>=1;
+    // Reward prominent, clean uppercase headings; penalize OCR debris and later lines.
+    const score=(uppercase>.8?28:0)+Math.min(letters,25)*.5+Math.min(words.length,4)*2-noise*10-index*6;
+    return {cleaned,score,valid};
+  }).filter(x=>x.valid);
   const store=storeCandidates.sort((a,b)=>b.score-a.score)[0]?.cleaned||'';
-  // Suggest only plausible WA street addresses from the receipt header.
-  // This is unverified OCR text, never a confirmed tax jurisdiction.
-  // Normalize common OCR separators before matching; retain the original text for review.
-  const addressLines=headerLines.slice(0,14).map(line=>line
+  // Match standard street suffixes and legitimate suffix-free street names
+  // (e.g. 6425 NE Fourth Plain) only when paired with a nearby WA city/ZIP line.
+  const addressLines=headerLines.slice(0,16).map(line=>line
     .replace(/_/g,' ').replace(/\s*\.\s*(?=(?:AVE|ST|RD|DR|LN|BLVD|WAY)\b)/gi,' ')
     .replace(/\s+/g,' ').trim());
+  const localityPattern=/\b([A-Za-z][A-Za-z .'-]{1,40})\s*,?\s+WA\s*(\d{5}(?:-\d{4})?)\b/i;
   const streetPattern=/\b\d{1,6}\s+(?:(?:N|S|E|W|NE|NW|SE|SW)\s+)?(?:[A-Za-z0-9'-]+\s+){1,7}(?:AVE(?:NUE)?|ST(?:REET)?|RD|ROAD|BLVD|DR(?:IVE)?|LN|LANE|WAY|CT|COURT|PL|PLACE|HWY|HIGHWAY)\b\.?/i;
-  const streetLine=addressLines.find(line=>streetPattern.test(line));
-  const cityLine=addressLines.find(line=>/\bWA\s*\d{5}(?:-\d{4})?\b/i.test(line));
+  const suffixFreeStreet=/\b\d{1,6}\s+(?:(?:N|S|E|W|NE|NW|SE|SW)\s+)?[A-Za-z][A-Za-z'-]+(?:\s+[A-Za-z][A-Za-z'-]+){0,5}\b/i;
+  const localityIndex=addressLines.findIndex(line=>localityPattern.test(line));
   let storeAddress='';
-  if(streetLine){
-    const street=streetLine.match(streetPattern)?.[0]?.trim().replace(/\.$/,'')||'';
-    const locality=cityLine?.match(/([A-Za-z][A-Za-z .'-]{1,40})[,\s]+WA\s*(\d{5}(?:-\d{4})?)/i);
-    storeAddress=street+(locality?`, ${locality[1].trim()}, WA ${locality[2]}`:'');
+  if(localityIndex>=0){
+    const locality=addressLines[localityIndex].match(localityPattern);
+    const nearby=addressLines.slice(Math.max(0,localityIndex-3),localityIndex);
+    const streetLine=[...nearby].reverse().find(line=>streetPattern.test(line)||suffixFreeStreet.test(line));
+    const street=streetLine?.match(streetPattern)?.[0]||streetLine?.match(suffixFreeStreet)?.[0]||'';
+    if(street){
+      const city=locality[1].trim().replace(/^[^A-Za-z]+/,'');
+      storeAddress=`${street.trim().replace(/\.$/,'')}, ${city}, WA ${locality[2]}`;
+    }
   }
   const totalCandidates=lines.filter(x=>/\b(grand\s*total|total|amount due|balance due)\b/i.test(x)&&!/subtotal|tax|savings/i.test(x)).map(amount).filter(x=>x!==null);
   const paymentCandidates=lines.filter(x=>/\b(debit card|credit card|card purchase|visa|mastercard|amount paid)\b/i.test(x)).map(amount).filter(x=>x!==null);
   const taxCandidates=[];
   for(const line of lines){
     if(/tax exempt|tax id|taxable grocery|taxable item/i.test(line))continue;
-    if(/\b(sales tax|tax|gst|hst)\b/i.test(line)&&amount(line)!==null){
-      taxCandidates.push({name:'Sales tax',amount:amount(line),source:'Printed on receipt'});
+    if(/(?:\b(?:sales tax|tax|gst|hst)\b|\bwashington\s*\(included\))/i.test(line)&&amount(line)!==null){
+      taxCandidates.push({name:/washington\s*\(included\)/i.test(line)?'Washington (Included)':'Sales tax',amount:amount(line),source:'Printed on receipt'});
       continue;
     }
     // OCR often adds random symbols before a printed rate/amount pair,
