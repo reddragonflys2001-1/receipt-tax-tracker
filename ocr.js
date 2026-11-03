@@ -661,6 +661,7 @@ scanButton.addEventListener('click',async()=>{
     if(!window.Tesseract) throw new Error('OCR library could not load. Check your internet connection and reload.');
     const worker=await Tesseract.createWorker('eng',1,{logger:m=>{if(m.status==='recognizing text')ocrStatus(`Recognizing text: ${Math.round((m.progress||0)*100)}%`);}});
     let texts=[];
+    const supplementalDiagnostics=[];
     try {
       for(let i=0;i<scanImages.length;i++){
         const bands=await receiptOcrBands(scanOcrImages[i]||scanImages[i]);
@@ -694,6 +695,7 @@ scanButton.addEventListener('click',async()=>{
               try {
                 ocrStatus(`Checking enlarged first product rows, photo ${i+1}/${scanImages.length}...`);
                 const focused=await worker.recognize(upper);
+                supplementalDiagnostics.push(`Upper enlarged reading (photo ${i+1}):\n${focused.data.text||'[no text]'}`);
                 selectedText=mergeReceiptBandReadings(selectedText,focused.data.text||'');
               } finally {upper.width=0;upper.height=0;}
             }
@@ -707,6 +709,7 @@ scanButton.addEventListener('click',async()=>{
               for(let k=0;k<regions.length;k++){
                 ocrStatus(`Checking first-item crop ${k+1}/${regions.length}, photo ${i+1}/${scanImages.length}...`);
                 const focused=await worker.recognize(regions[k]);
+                supplementalDiagnostics.push(`Focused crop ${k+1} (photo ${i+1}):\n${focused.data.text||'[no text]'}`);
                 selectedText=mergeReceiptBandReadings(selectedText,focused.data.text||'');
                 // The alternate contrast pass is confined to the middle crop,
                 // keeping scan time reasonable on phones.
@@ -714,6 +717,7 @@ scanButton.addEventListener('click',async()=>{
                   const contrasted=enhanceReceiptBand(regions[k]);
                   try {
                     const alt=await worker.recognize(contrasted);
+                    supplementalDiagnostics.push(`Contrasted crop ${k+1} (photo ${i+1}):\n${alt.data.text||'[no text]'}`);
                     selectedText=mergeReceiptBandReadings(selectedText,alt.data.text||'');
                   } finally {contrasted.width=0;contrasted.height=0;}
                 }
@@ -726,7 +730,7 @@ scanButton.addEventListener('click',async()=>{
       }
     }
     finally {await worker.terminate();}
-    const combined=texts.join('\n');scanText.value=combined;
+    const combined=texts.join('\n');scanText.value=combined + (supplementalDiagnostics.length ? '\n\n===== UPDATE 29 DIAGNOSTICS (NOT USED FOR PRODUCT EXTRACTION) =====\n' + supplementalDiagnostics.join('\n\n-----\n') : '');
     const footerCheck=suppressIsolatedFooterEcho(combined);
     // Clear prior OCR suggestions only, leave existing manual fields/taxes intact.
     document.querySelectorAll('.ocr-uncertain').forEach(el=>el.classList.remove('ocr-uncertain'));

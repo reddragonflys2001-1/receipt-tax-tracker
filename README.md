@@ -71,3 +71,7 @@ OCR now divides long receipt photos at nearby pale horizontal gaps instead of ov
 - Merges only UPC-and-price verified extra lines with occurrence-aware checks; never appends the full extra OCR pass or guesses unreadable prices.
 - Preserves Update 26 recovery of product descriptions with damaged UPC/price and blank-price review warnings.
 - Actual OCR accuracy must be tested in the browser using the original receipt photo.
+
+
+## Update 29 diagnostic
+The Recognized text field now includes supplemental OCR crop readings after a marked separator. These readings are diagnostic only and are NOT parsed as additional products, to prevent double counting. Do not save a receipt until the products and prices are manually verified.
