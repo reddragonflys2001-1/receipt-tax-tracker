@@ -76,6 +76,36 @@ function receiptOcrItemScore(text){
   }
   return scored;
 }
+// Combine complementary OCR readings of the SAME image band without
+// doubling repeated purchases. Only add a line when its UPC has more
+// occurrences in the alternate reading than in the selected reading.
+// Price differences alone never create another purchase.
+function mergeReceiptBandReadings(primary, alternate) {
+  const a=primary.split(/\r?\n/), b=alternate.split(/\r?\n/);
+  const item=(line)=>{
+    const m=line.match(/\b(\d[\d ]{8,16}\d)K?\s+(?:[FNTO]\s+)?\$?\s*(\d{1,4}[.,]\d{2})\s*[XNTO0]?\s*$/i);
+    if(!m)return null;
+    const upc=m[1].replace(/\s/g,'');
+    const name=line.slice(0,m.index).replace(/^[^A-Za-z]+/,'').trim();
+    if(upc.length<10||upc.length>14||!/[A-Za-z]{3}/.test(name))return null;
+    return {upc,line};
+  };
+  const counts=new Map();
+  for(const line of a){const x=item(line);if(x)counts.set(x.upc,(counts.get(x.upc)||0)+1);}
+  const seen=new Map(), extras=[];
+  for(const line of b){
+    const x=item(line);if(!x)continue;
+    const occurrence=(seen.get(x.upc)||0)+1;seen.set(x.upc,occurrence);
+    if(occurrence>(counts.get(x.upc)||0))extras.push(x);
+  }
+  if(!extras.length)return primary;
+  // Insert before the printed subtotal/tax/total so the normal parser sees
+  // them as receipt products. All inserted rows remain OCR suggestions.
+  let insert=a.findIndex(line=>/\b(?:subtotal|subt[o0]tal|tax\s*[1Il]|total)\b/i.test(line));
+  if(insert<0)insert=a.length;
+  a.splice(insert,0,...extras.map(x=>x.line));
+  return a.join('\n');
+}
 function renderScanImages() {
   scanPreview.replaceChildren();
   scanImages.forEach((src,index) => {
@@ -347,7 +377,7 @@ function parseReceiptText(text) {
     const walmartItems=[];
     for(const raw of region){
       // Anchored UPC followed by a printed price, not arbitrary numbers in OCR debris.
-      const m=raw.match(/\b(\d[\d ]{7,17}\d)\s+(?:[FNTO]\s+)?\$?\s*(\d{1,3}[.,]\d{2})\s*(?:[XNTO0])?\s*$/i);
+      const m=raw.match(/\b(\d[\d ]{7,17}\d)K?\s+(?:[FNTO]\s+)?\$?\s*(\d{1,3}[.,]\d{2})\s*(?:[XNTO0])?\s*$/i);
       if(!m)continue;
       const upc=m[1].replace(/\s/g,'');
       if(upc.length<10||upc.length>14)continue;
@@ -424,7 +454,7 @@ function parseReceiptText(text) {
   const knownItemLines=new Set(items.map(item=>item.raw));
   for(const raw of lines){
     if(knownItemLines.has(raw)||itemStop.test(raw)||/items sold|survey|walmart|supercenter|manager|mgr\./i.test(raw))continue;
-    const matches=[...raw.matchAll(/(?:^|\s)(\d(?:[\d\s]{6,17}\d))\s+(?:[FNTO]\s+)?\$?\s*(\d{1,4}[.,]\d{2})(?!\d)/gi)];
+    const matches=[...raw.matchAll(/(?:^|\s)(\d(?:[\d\s]{6,17}\d))K?\s+(?:[FNTO]\s+)?\$?\s*(\d{1,4}[.,]\d{2})(?!\d)/gi)];
     if(!matches.length)continue;
     const m=matches[0], upc=m[1].replace(/\s/g,'');
     if(upc.length<8||upc.length>14)continue;
@@ -507,15 +537,21 @@ scanButton.addEventListener('click',async()=>{
           const original=await worker.recognize(bands[j]);
           const originalText=original.data.text||'';
           let selectedText=originalText;
+          let alternativeText='';
           const enhanced=enhanceReceiptBand(bands[j]);
           try {
             ocrStatus(`Comparing enhanced text, photo ${i+1}/${scanImages.length}, section ${j+1}/${bands.length}...`);
             const alternative=await worker.recognize(enhanced);
-            const alternativeText=alternative.data.text||'';
+            alternativeText=alternative.data.text||'';
             // Prefer the image that reads more complete UPC/price rows.
             // Never concatenate both: it would duplicate receipt items.
             if(receiptOcrItemScore(alternativeText)>receiptOcrItemScore(originalText))selectedText=alternativeText;
           } finally {enhanced.width=0;enhanced.height=0;}
+          // Recover additional, UPC-verified lines from the other reading.
+          // Match occurrence counts by UPC to preserve four identical boxes
+          // without adding eight when both readings see the same four.
+          selectedText=mergeReceiptBandReadings(selectedText,
+            selectedText===originalText?alternativeText:originalText);
           texts.push(selectedText);
           bands[j].width=0;bands[j].height=0;
         }

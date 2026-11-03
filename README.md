@@ -28,3 +28,12 @@ IMPORTANT: OCR is not guaranteed to recognize all items. Always verify extracted
 - Recognition will take longer (approximately two passes).
 - The 23-item Walmart result is a testing goal, not a guaranteed outcome; visually verify prices, item count, and totals.
 - Existing live reconciliation, tax handling and review warnings remain unchanged.
+
+
+## Update 21 — complementary OCR recovery
+
+- Compares original and enhanced OCR readings for each image section, then keeps extra UPC-anchored item rows found only in the alternate reading.
+- Uses UPC occurrence counts to avoid duplicating identical purchases that appear in both OCR readings.
+- Accepts the Walmart checkout bag-fee UPC suffix `K` when a readable price is present.
+- Preserves manual price correction, live reconciliation, separate tax lines, and the incomplete-item warning.
+- **All OCR prices remain suggestions**: visually verify every price, quantity and item against the photo before saving. A second OCR reading is not independent proof of price accuracy.
