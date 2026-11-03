@@ -74,35 +74,51 @@ function checkWaAddress() {
 }
 document.querySelector('#wa-check-address').addEventListener('click', checkWaAddress);
 
-// Diagnostic only: test cross-origin read access from GitHub Pages. No rate lookup or saved data changes.
+// Diagnostic only. Browser cross-origin permissions are tested against the actual DOR address API.
+// No fields or saved receipt data are modified by this test.
 document.querySelector('#wa-test-access').addEventListener('click', async () => {
   const status = document.querySelector('#wa-access-status');
   const button = document.querySelector('#wa-test-access');
   if (!checkWaAddress()) {
-    status.textContent = 'Please correct and check the store address first. No request was sent.';
+    status.textContent = 'Please correct the store address first. No request was sent.';
     status.classList.add('error');
     return;
   }
+  const match = form.elements.storeAddress.value.replace(/\s+/g, ' ').trim()
+    .match(/^(.+?),\s*([^,]+),\s*(?:WA|Washington)\s+(\d{5})(?:-\d{4})?$/i);
+  const params = new URLSearchParams({output:'xml', addr:match[1], city:match[2], zip:match[3]});
+  const url = `https://webgis.dor.wa.gov/webapi/AddressRates.aspx?${params}`;
   button.disabled = true;
   status.classList.remove('error');
-  status.textContent = 'Testing whether this browser can read the official DOR page…';
+  status.textContent = 'Contacting the official Washington DOR address API…';
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), 12000);
   try {
-    const response = await fetch('https://webgis.dor.wa.gov/taxratelookup/salestax.aspx', {
-      method: 'GET', mode: 'cors', cache: 'no-store', signal: controller.signal
-    });
-    if (!response.ok) {
-      status.textContent = `DOR responded with HTTP ${response.status}. This test did not retrieve a tax rate. We may need downloadable historical data.`;
+    const response = await fetch(url, {method:'GET', mode:'cors', cache:'no-store', signal:controller.signal});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const raw = await response.text();
+    const xml = new DOMParser().parseFromString(raw, 'application/xml');
+    if (xml.querySelector('parsererror')) throw new Error('The response was not valid XML');
+    const root = xml.documentElement;
+    if (root.nodeName.toLowerCase() !== 'response') throw new Error('Unexpected API response');
+    const code = root.getAttribute('code') || 'unknown';
+    const loc = root.getAttribute('loccode') || 'unknown';
+    const rate = root.querySelector('rate');
+    const address = root.querySelector('addressline');
+    const stateRate = rate?.getAttribute('staterate');
+    const localRate = rate?.getAttribute('localrate') || root.getAttribute('localrate');
+    const combined = root.getAttribute('rate');
+    const percent = v => v !== null && Number.isFinite(Number(v)) && Number(v) >= 0 ? `${(Number(v)*100).toFixed(2)}%` : 'unavailable';
+    if (loc === '-1' || !combined || Number(combined) < 0) {
+      status.textContent = `DOR replied, but did not return a usable rate (response code ${code}; location ${loc}). Check the address on the official DOR website. No receipt data changed.`;
       status.classList.add('error');
     } else {
-      await response.text();
-      status.textContent = 'Browser can read this DOR web page. This does NOT confirm that the tax-rate API supports browser requests or historical lookups. No rate was retrieved.';
+      status.textContent = `SUCCESS: This browser can read the DOR address API. Jurisdiction: ${rate?.getAttribute('name') || 'not supplied'}; location code: ${loc}; state: ${percent(stateRate)}; local: ${percent(localRate)}; combined: ${percent(combined)}; rate period: ${address?.getAttribute('period') || 'not supplied'}; API response code: ${code}. Diagnostic only—nothing was saved or changed. Check the rate period against the receipt date before using these figures.`;
     }
   } catch (error) {
     status.textContent = error.name === 'AbortError'
-      ? 'Connection test timed out. No tax rate was retrieved.'
-      : 'Browser could not read the DOR page directly (possibly cross-origin restrictions or a network issue). The official lookup link can still work in a separate tab. No tax rate was retrieved.';
+      ? 'The DOR address API request timed out. No receipt data changed.'
+      : `This browser could not read the DOR address API (${error.message === 'Failed to fetch' ? 'possibly blocked by cross-origin browser security' : error.message}). Opening the API in another tab can still work. No receipt data changed.`;
     status.classList.add('error');
   } finally {
     clearTimeout(timeout);
