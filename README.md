@@ -45,3 +45,7 @@ IMPORTANT: OCR is not guaranteed to recognize all items. Always verify extracted
 - Legitimate repeated items remain separate when an alternate scan really contains more occurrences.
 - Conservative merging may still miss items with unreadable names, and it does not automatically correct prices.
 - Re-test the Walmart receipt and compare the entire extracted list with the original before saving.
+
+## Update 23 — nonoverlapping OCR sections
+
+OCR now divides long receipt photos at nearby pale horizontal gaps instead of overlapping sections. This is designed to prevent the same printed UPC row being read twice at section boundaries while retaining genuine repeated purchases. OCR price mistakes and unreadable product rows still require manual review. Test against the original receipt before saving.

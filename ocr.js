@@ -33,17 +33,43 @@ async function receiptOcrBands(dataUrl) {
   const img=new Image();img.src=dataUrl;
   await img.decode();
   const bands=[];
-  const bandHeight=Math.min(1450,img.naturalHeight);
-  const overlap=90;
-  for(let y=0;y<img.naturalHeight;y+=Math.max(1,bandHeight-overlap)){
-    const height=Math.min(bandHeight,img.naturalHeight-y);
-    if(height<overlap && bands.length)break;
-    const canvas=document.createElement('canvas');
-    canvas.width=img.naturalWidth;canvas.height=height;
-    canvas.getContext('2d').drawImage(img,0,y,img.naturalWidth,height,0,0,img.naturalWidth,height);
-    bands.push(canvas);
-    if(y+height>=img.naturalHeight)break;
+  // Find a pale horizontal gap near each boundary. Each physical receipt row
+  // belongs to exactly one section; overlapping OCR sections previously
+  // produced duplicate UPC rows (including identical repeated products).
+  const probe=document.createElement('canvas');
+  probe.width=img.naturalWidth;probe.height=img.naturalHeight;
+  const ctx=probe.getContext('2d',{willReadFrequently:true});
+  ctx.drawImage(img,0,0);
+  const width=probe.width,height=probe.height;
+  const rgba=ctx.getImageData(0,0,width,height).data;
+  const sampleStep=Math.max(1,Math.floor(width/350));
+  function darkness(y){
+    let score=0;
+    for(let x=0;x<width;x+=sampleStep){
+      const k=(y*width+x)*4;
+      const gray=.299*rgba[k]+.587*rgba[k+1]+.114*rgba[k+2];
+      if(gray<165)score++;
+    }
+    return score;
   }
+  let y=0;
+  while(y<height){
+    let end=Math.min(height,y+1450);
+    if(end<height){
+      let best=end,bestScore=Infinity;
+      for(let candidate=Math.max(y+950,end-100);candidate<=Math.min(height-1,end+100);candidate+=2){
+        const score=darkness(candidate-1)+darkness(candidate)+darkness(candidate+1);
+        if(score<bestScore){bestScore=score;best=candidate;}
+      }
+      end=best;
+    }
+    const canvas=document.createElement('canvas');
+    canvas.width=width;canvas.height=end-y;
+    canvas.getContext('2d').drawImage(img,0,y,width,end-y,0,0,width,end-y);
+    bands.push(canvas);
+    y=end;
+  }
+  probe.width=0;probe.height=0;
   return bands;
 }
 // Enhance faint thermal-printer text for a second, independent OCR attempt.
