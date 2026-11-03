@@ -75,3 +75,7 @@ OCR now divides long receipt photos at nearby pale horizontal gaps instead of ov
 
 ## Update 29 diagnostic
 The Recognized text field now includes supplemental OCR crop readings after a marked separator. These readings are diagnostic only and are NOT parsed as additional products, to prevent double counting. Do not save a receipt until the products and prices are manually verified.
+
+
+## Update 30 — Smart camera (manual + automatic)
+Use **Open smart camera** on HTTPS (GitHub Pages) and allow camera permission. The guide estimates lighting, detail, and motion, turning green when thresholds pass. Manual mode lets you take a photo at any time; automatic mode takes a photo after approximately 1.8 seconds of stable green readings. Auto capture can take additional photos as the camera is repositioned; close it when finished. Up to eight photos are retained. Existing Take photo and Upload photos remain as fallback. The guide cannot reliably determine receipt boundaries or guarantee OCR accuracy.

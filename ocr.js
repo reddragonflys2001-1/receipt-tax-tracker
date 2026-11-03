@@ -744,3 +744,25 @@ scanButton.addEventListener('click',async()=>{
   finally{scanButton.disabled=false;}
 });
 window.resetOcrPhotos=()=>{scanImages=[];scanOcrImages=[];window.pendingOcrPhotos=[];scanText.value='';scanWarnings.textContent='';renderScanImages();};
+
+// Update 30: live camera guide; optional fallback to native camera remains available.
+(() => {
+ const open=document.querySelector('#smart-camera-open'),ui=document.querySelector('#smart-camera-ui');
+ const video=document.querySelector('#smart-camera-video'),frame=document.querySelector('#smart-camera-frame');
+ const mode=document.querySelector('#smart-camera-mode'),feedback=document.querySelector('#smart-camera-feedback');
+ const shoot=document.querySelector('#smart-camera-shoot'),close=document.querySelector('#smart-camera-close');
+ let stream=null,interval=null,stable=0,busy=false,lastFrame=null,ready=false;
+ const canvas=document.createElement('canvas');canvas.width=240;canvas.height=320;
+ const ctx=canvas.getContext('2d',{willReadFrequently:true});
+ function stop(){if(interval)clearInterval(interval);interval=null;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;ui.hidden=true;open.hidden=false;stable=0;lastFrame=null;ready=false;frame.classList.remove('ready');}
+ async function capture(){if(!stream||busy||scanImages.length>=8)return;busy=true;try{const shot=document.createElement('canvas');shot.width=video.videoWidth;shot.height=video.videoHeight;shot.getContext('2d').drawImage(video,0,0,shot.width,shot.height);const blob=await new Promise(r=>shot.toBlob(r,'image/jpeg',.96));if(!blob)throw Error('Could not capture photo');const file=new File([blob],`receipt-${Date.now()}.jpg`,{type:'image/jpeg'});scanImages.push(await compressReceipt(file));scanOcrImages.push(await compressReceipt(file,4200,.94));renderScanImages();feedback.textContent=`Captured ${scanImages.length} of 8 photos. Reposition for another section or close camera.`;stable=0;}catch(e){feedback.textContent=e.message;}finally{busy=false;}}
+ function inspect(){if(!stream||video.readyState<2||busy)return;ctx.drawImage(video,0,0,240,320);const pixels=ctx.getImageData(0,0,240,320).data;let sum=0,sumsq=0,edge=0,centerLight=0,centerCount=0,change=0;const gray=new Uint8Array(240*320);for(let y=0;y<320;y+=1)for(let x=0;x<240;x+=1){const i=y*240+x,k=i*4;const g=Math.round(.299*pixels[k]+.587*pixels[k+1]+.114*pixels[k+2]);gray[i]=g;sum+=g;sumsq+=g*g;if(x>25&&x<215&&y>25&&y<295){centerLight+=g;centerCount++;}if(lastFrame)change+=Math.abs(g-lastFrame[i]);}
+ const avg=sum/gray.length,variance=sumsq/gray.length-avg*avg;for(let y=2;y<318;y+=2)for(let x=2;x<238;x+=2){const i=y*240+x;edge+=Math.abs(gray[i]-gray[i-1])+Math.abs(gray[i]-gray[i-240]);}
+ const detail=edge/(119*158),motion=lastFrame?change/gray.length:999;lastFrame=gray;
+ const issues=[];if(avg<75)issues.push('Add more light');if(avg>222)issues.push('Reduce glare / brightness');if(variance<850||detail<13)issues.push('Move closer or aim at printed text');if(motion>13)issues.push('Hold camera steady');
+ ready=issues.length===0;frame.classList.toggle('ready',ready);feedback.textContent=ready?'Green — image looks steady and readable. Capture when ready.':'Red — '+issues.join('; ');
+ if(mode.value==='auto'&&ready){stable++;if(stable>=4){stable=0;capture();}}else stable=0;
+ }
+ open.addEventListener('click',async()=>{if(!navigator.mediaDevices?.getUserMedia){feedback.textContent='Live camera unavailable. Use Take photo instead.';ui.hidden=false;return;}try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:2560}},audio:false});video.srcObject=stream;await video.play();ui.hidden=false;open.hidden=true;feedback.textContent='Point the camera at the receipt and hold steady.';interval=setInterval(inspect,450);}catch(e){ui.hidden=false;feedback.textContent='Camera permission or access failed. Use Take photo instead. '+e.message;}});
+ shoot.addEventListener('click',capture);close.addEventListener('click',stop);mode.addEventListener('change',()=>{stable=0;});document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});window.addEventListener('pagehide',stop);
+})();
