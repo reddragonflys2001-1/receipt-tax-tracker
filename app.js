@@ -316,7 +316,7 @@ function addItem(data = {}) {
   row.className = 'line-row item-row';
   row.innerHTML = `<label>Item description<input data-key="name" placeholder="Product" value="${escapeHtml(data.name || '')}"></label>
     <label>Quantity<input data-key="qty" type="number" min="0" step="0.001" value="${escapeHtml(data.qty ?? 1)}"></label>
-    <label>Price ($)<input data-key="price" type="number" min="0" step="0.01" value="${escapeHtml(data.price ?? '')}"></label>
+    <label>Price ($)<input data-key="price" type="number" step="0.01" value="${escapeHtml(data.price ?? '')}"></label>
     <button type="button" class="secondary">Remove</button>`;
   row.querySelector('button').addEventListener('click', () => row.remove());
   itemsBox.append(row);

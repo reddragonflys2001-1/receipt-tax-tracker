@@ -222,6 +222,53 @@ function parseReceiptText(text) {
     usedPriceLines.add(candidate.j);
     i=candidate.j;
   }
+  // Many retail receipts print the quantity, product and extended price on ONE line.
+  // Keep this independent of the legacy multi-line grocery parser above.
+  const sameLineMoney=/\$\s*([0-9]{1,5}[.,][0-9]{2})\b/g;
+  const itemStop=/\b(?:subtotal|grand\s*total|total|tax|cashier|station|invoice|date|time|credit|debit|payment|balance|change|phone|transaction|receipt|discount\s*total|amount\s*due|authorization)\b/i;
+  const existingSources=new Set(items.map(x=>x.raw));
+  for(let i=0;i<lines.length;i++){
+    const raw=lines[i];
+    if(existingSources.has(raw)||itemStop.test(raw))continue;
+    const amounts=[...raw.matchAll(sameLineMoney)];
+    if(!amounts.length)continue;
+    const final=amounts[amounts.length-1];
+    let price=Number(final[1].replace(',','.'));
+    if(!Number.isFinite(price)||price<=0||price>100000)continue;
+    const before=raw.slice(0,final.index);
+    const isDiscount=/\b(?:employee|employees|coupon|discount|markdown|savings)\b/i.test(before);
+    // Never treat a printed discount as a purchased product, or silently guess
+    // whether a corrupted parenthesized number is a negative dollar amount.
+    if(isDiscount){
+      const looksNegative=/\(\s*\$?\s*[0-9]+[.,][0-9]{2}\s*\)|-\s*\$\s*[0-9]+[.,][0-9]{2}/.test(raw);
+      if(!looksNegative)continue;
+      price=-price;
+    }
+    let name=before.replace(/^[^A-Za-z0-9]*?(?=\d+\s*[-–]\s*|[A-Za-z])/,'')
+      .replace(/^\s*\d{1,2}\s*[-–]\s*/,'')
+      .replace(/\s+\d+(?:[.,]\d+)?\s*$/,'')
+      .replace(/[|§*]+/g,' ').replace(/\s+/g,' ').trim();
+    // Remove leading OCR fragments only if a clear product name follows.
+    name=name.replace(/^(?:[a-z]{1,3}|[=~—-]+)\s+(?=[A-Z][a-z])/,'').trim();
+    if(name.length<4||!/[A-Za-z]{3}/.test(name)||/^\d/.test(name))continue;
+    if(/\b(?:washington|included|taxable|change|cash)\b/i.test(name))continue;
+    const qtyMatch=before.match(/(?:^|\s)(\d{1,2})\s*[-–]\s*/);
+    const qty=qtyMatch?Number(qtyMatch[1]):1;
+    if(qty<1||qty>100)continue;
+    // Any line containing multiple prices or OCR noise must be checked by hand.
+    const uncertain=amounts.length>1||!qtyMatch||/^[a-z]{1,3}\s/.test(before)||isDiscount;
+    items.push({name:name.slice(0,110),qty,price,raw,priceText:raw,uncertain});
+    existingSources.add(raw);
+  }
+  // Itemized lines are suggestions; warn if they do not reconcile with the
+  // printed subtotal (which may legitimately exclude included taxes/discounts).
+  const itemSum=items.reduce((sum,item)=>sum+item.qty*item.price,0);
+  if(items.length && subtotal!==null && Math.abs(itemSum-subtotal)>0.02){
+    const warning=document.createElement('p');
+    warning.className='ocr-match-warning';
+    warning.textContent=`Item suggestions total $${itemSum.toFixed(2)} versus printed subtotal $${subtotal.toFixed(2)}. Review missing items, discounts, and included taxes; nothing has been adjusted automatically.`;
+    // The scan handler displays this warning alongside the OCR summary.
+  }
   items.slice(0,30).forEach(item=>{
     addItem(item);
     const row=itemsBox.lastElementChild;
@@ -234,7 +281,7 @@ function parseReceiptText(text) {
     details.append(summary,original);row.append(details);
     if(item.uncertain){const note=document.createElement('p');note.className='ocr-match-warning';note.textContent='Review this match: OCR could not fully verify the description or quantity against the price.';row.append(note);}
   });
-  return {fields:[store&&'Store',date&&'Date',total!==null&&'Total',subtotal!==null&&'Subtotal'].filter(Boolean),taxCount:uniqueTaxes.length,itemCount:items.length,uncertainItems:items.filter(x=>x.uncertain).length,totalFromPayment,estimatedTax:uniqueTaxes.some(t=>t.source==='Calculated estimate')};
+  return {itemReconciliationWarning:items.length && subtotal!==null && Math.abs(itemSum-subtotal)>0.02 ? ` Item suggestions total $${itemSum.toFixed(2)} versus printed subtotal $${subtotal.toFixed(2)}; review missing items and discounts.` : '',fields:[store&&'Store',date&&'Date',total!==null&&'Total',subtotal!==null&&'Subtotal'].filter(Boolean),taxCount:uniqueTaxes.length,itemCount:items.length,uncertainItems:items.filter(x=>x.uncertain).length,totalFromPayment,estimatedTax:uniqueTaxes.some(t=>t.source==='Calculated estimate')};
 }
 scanButton.addEventListener('click',async()=>{
   if(!scanImages.length)return;
@@ -251,7 +298,7 @@ scanButton.addEventListener('click',async()=>{
     document.querySelectorAll('.ocr-uncertain').forEach(el=>el.classList.remove('ocr-uncertain'));
     const parsed=parseReceiptText(combined);
     if(scanImages.length){pendingPhoto=scanImages[0];window.pendingOcrPhotos=[...scanImages];}
-    scanWarnings.textContent=`OCR suggested ${parsed.fields.join(', ')||'no standard fields'} and ${parsed.taxCount} tax suggestion(s), plus ${parsed.itemCount} possible item(s). ${parsed.uncertainItems?parsed.uncertainItems+" item match(es) need extra review. ":""}${parsed.totalFromPayment?"Total was suggested from a payment line. ":""}${parsed.estimatedTax?"A possible tax was estimated from the difference; it is NOT verified printed tax. ":""}Verify every field, tax and item before saving. Never add a calculated tax estimate on top of a printed tax. Only the first photo is shown in older receipt views; all optimized photos are saved in the receipt record.`;
+    scanWarnings.textContent=`OCR suggested ${parsed.fields.join(', ')||'no standard fields'} and ${parsed.taxCount} tax suggestion(s), plus ${parsed.itemCount} possible item(s). ${parsed.uncertainItems?parsed.uncertainItems+" item match(es) need extra review. ":""}${parsed.totalFromPayment?"Total was suggested from a payment line. ":""}${parsed.itemReconciliationWarning||''}${parsed.estimatedTax?"A possible tax was estimated from the difference; it is NOT verified printed tax. ":""}Verify every field, tax and item before saving. Never add a calculated tax estimate on top of a printed tax. Only the first photo is shown in older receipt views; all optimized photos are saved in the receipt record.`;
     ocrStatus('Scan complete. Review highlighted fields and the receipt photo before saving.');
     document.dispatchEvent(new Event('receipt-ocr-complete'));
     form.scrollIntoView({behavior:'smooth',block:'start'});
