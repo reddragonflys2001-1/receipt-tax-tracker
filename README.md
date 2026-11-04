@@ -79,3 +79,11 @@ The Recognized text field now includes supplemental OCR crop readings after a ma
 
 ## Update 30 — Smart camera (manual + automatic)
 Use **Open smart camera** on HTTPS (GitHub Pages) and allow camera permission. The guide estimates lighting, detail, and motion, turning green when thresholds pass. Manual mode lets you take a photo at any time; automatic mode takes a photo after approximately 1.8 seconds of stable green readings. Auto capture can take additional photos as the camera is repositioned; close it when finished. Up to eight photos are retained. Existing Take photo and Upload photos remain as fallback. The guide cannot reliably determine receipt boundaries or guarantee OCR accuracy.
+
+## Update 31 — Camera preview alignment
+
+- Request a portrait camera feed where supported.
+- Fit the preview frame to the actual video aspect ratio (landscape fallback supported) so there are no letterboxed black areas.
+- Keep the dashed guide inside the live video image.
+- Clarify that the green indicator measures basic image quality, not receipt-edge detection.
+- Retain manual/automatic capture, multiple photos, and prior OCR behavior.
