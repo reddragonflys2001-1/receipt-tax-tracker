@@ -79,8 +79,6 @@ function enhanceReceiptBand(source) {
   const canvas=document.createElement('canvas');
   canvas.width=source.width;canvas.height=source.height;
   const ctx=canvas.getContext('2d',{willReadFrequently:true});
- function syncCameraFrame(){if(video.videoWidth&&video.videoHeight){frame.style.setProperty('--camera-aspect',`${video.videoWidth} / ${video.videoHeight}`);frame.dataset.orientation=video.videoHeight>=video.videoWidth?'portrait':'landscape';}}
- video.addEventListener('loadedmetadata',syncCameraFrame);
   ctx.drawImage(source,0,0);
   const frame=ctx.getImageData(0,0,canvas.width,canvas.height);
   const pixels=frame.data;
@@ -126,8 +124,6 @@ function focusedFirstItemRegions(source) {
     canvas.width=Math.round(source.width*factor);
     canvas.height=Math.round((bottom-top)*factor);
     const ctx=canvas.getContext('2d',{willReadFrequently:true});
- function syncCameraFrame(){if(video.videoWidth&&video.videoHeight){frame.style.setProperty('--camera-aspect',`${video.videoWidth} / ${video.videoHeight}`);frame.dataset.orientation=video.videoHeight>=video.videoWidth?'portrait':'landscape';}}
- video.addEventListener('loadedmetadata',syncCameraFrame);
     ctx.imageSmoothingEnabled=true;
     ctx.imageSmoothingQuality='high';
     ctx.drawImage(source,0,top,source.width,bottom-top,0,0,canvas.width,canvas.height);

@@ -87,3 +87,5 @@ Use **Open smart camera** on HTTPS (GitHub Pages) and allow camera permission. T
 - Keep the dashed guide inside the live video image.
 - Clarify that the green indicator measures basic image quality, not receipt-edge detection.
 - Retain manual/automatic capture, multiple photos, and prior OCR behavior.
+
+Update 32: Removed two accidental camera-video references from OCR image processing that caused `video is not defined` during scans.
