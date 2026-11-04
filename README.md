@@ -1,3 +1,5 @@
+Update 35: portrait guided capture and improved alignment overlay. Camera frames and saved photos now use the same centered 3:4 portrait crop, even when Android supplies a landscape camera stream. A high-contrast adjustable overlay shows previous lines; automatic capture requires the old bottom section to align within the upper portion of the new image. Existing OCR merge remains experimental; do not assume duplicate rows are fully fixed.
+
 # Receipt & Tax Tracker — Update 33
 
 Adds conservative multi-photo overlap detection for OCR UPC rows. The scanner compares ordered product UPC sequences between neighboring photos and removes repeated recognized lines only when a sufficiently distinctive matching sequence is found. Identical repeated purchases within one photo are retained. Ambiguous overlaps remain visible for manual review.

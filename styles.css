@@ -119,3 +119,11 @@ footer{text-align:center;color:var(--muted);padding:20px;font-size:.85rem}
 .camera-panel{margin:12px 0}.camera-panel[hidden],#smart-camera-ui[hidden]{display:none}.smart-camera-frame{position:relative;max-width:460px;margin:10px 0;background:#161616;border:5px solid #c53c3c;border-radius:12px;overflow:hidden;aspect-ratio:var(--camera-aspect,3/4);width:min(100%,460px)}.smart-camera-frame.ready{border-color:#179c51}.smart-camera-frame video{width:100%;height:100%;object-fit:contain;display:block}.smart-camera-guide{position:absolute;inset:6% 6%;border:2px dashed rgba(255,255,255,.85);border-radius:8px;pointer-events:none}#smart-camera-feedback{font-weight:600;min-height:2em}#smart-camera-mode{max-width:220px;margin:6px 0}
 
 #smart-camera-overlap{position:absolute;top:6%;left:6%;width:88%;height:27%;opacity:.36;pointer-events:none;display:none;border-bottom:2px solid #fff}#smart-camera-frame.has-overlap #smart-camera-overlap{display:block}#smart-camera-torch{max-width:160px}
+
+/* Update 35: portrait viewport and visible, adjustable alignment overlay. */
+.smart-camera-frame{aspect-ratio:3/4!important;max-width:460px}
+.smart-camera-frame video{object-fit:cover}
+#smart-camera-overlap{left:0;width:100%;height:20%;opacity:var(--overlap-opacity,.72);border:2px solid #ffe25d;box-sizing:border-box;filter:contrast(1.8) brightness(1.15);mix-blend-mode:screen;z-index:3}
+.smart-camera-overlap-label{display:none;position:absolute;top:0;right:0;padding:3px 7px;background:#171717;color:#ffe25d;font-size:11px;font-weight:700;z-index:4;pointer-events:none}
+.smart-camera-frame.has-overlap .smart-camera-overlap-label{display:block}
+#smart-camera-opacity{width:100%;max-width:300px}
