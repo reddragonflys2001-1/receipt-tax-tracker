@@ -261,7 +261,7 @@ function renderScanImages() {
     const wrap=document.createElement('div');wrap.className='ocr-image';
     const img=document.createElement('img');img.src=src;img.alt=`Receipt photo ${index+1}`;
     const remove=document.createElement('button');remove.type='button';remove.className='secondary';remove.textContent='Remove';
-    remove.addEventListener('click',()=>{scanImages.splice(index,1);scanOcrImages.splice(index,1);renderScanImages();});
+    remove.addEventListener('click',()=>{scanImages.splice(index,1);scanOcrImages.splice(index,1);renderScanImages();retainCurrentPhotos();});
     wrap.append(img,remove);scanPreview.append(wrap);
   });
   scanButton.disabled = scanImages.length===0;
@@ -278,11 +278,27 @@ async function receiveImages(event) {
       scanImages.push(preview);scanOcrImages.push(ocrCopy);
     } catch(error) {ocrStatus(error.message);}
   }
-  event.target.value='';renderScanImages();
+  event.target.value='';renderScanImages();retainCurrentPhotos();
   if (scanImages.length) ocrStatus(`${scanImages.length} optimized photo(s) ready. Photos are not uploaded for OCR.`);
 }
 scanInput.addEventListener('change',receiveImages);
 scanCamera.addEventListener('change',receiveImages);
+
+// Update 34: keep the latest capture set in local IndexedDB for repeat scans.
+const receiptPhotoCache=(()=>{
+ const DB='receipt-tracker-capture-cache',KEY='latest';
+ function db(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB,1);req.onupgradeneeded=()=>req.result.createObjectStore('photos');req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});}
+ async function action(type,value){const database=await db();return new Promise((resolve,reject)=>{const tx=database.transaction('photos',type==='get'?'readonly':'readwrite');const store=tx.objectStore('photos');const req=type==='get'?store.get(KEY):type==='delete'?store.delete(KEY):store.put(value,KEY);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);tx.oncomplete=()=>database.close();});}
+ return {get:()=>action('get'),put:v=>action('put',v),clear:()=>action('delete')};
+})();
+let photoSaveTimer;
+function retainCurrentPhotos(){clearTimeout(photoSaveTimer);photoSaveTimer=setTimeout(async()=>{try{if(scanImages.length)await receiptPhotoCache.put({preview:[...scanImages],ocr:[...scanOcrImages],date:Date.now()});}catch(e){document.querySelector('#ocr-photo-storage').textContent='Local photo retention unavailable: '+e.message;}},650);}
+function photoStorageMessage(message){document.querySelector('#ocr-photo-storage').textContent=message;}
+document.querySelector('#ocr-retry-photos').addEventListener('click',async()=>{try{const saved=await receiptPhotoCache.get();if(!saved?.preview?.length){photoStorageMessage('No previous photo set is stored on this device.');return;}scanImages=[...saved.preview];scanOcrImages=[...saved.ocr];renderScanImages();photoStorageMessage(`${scanImages.length} photos restored. Tap Scan photos and fill form to retry OCR.`);}catch(e){photoStorageMessage('Cannot restore previous photos: '+e.message);}});
+document.querySelector('#ocr-save-photos').addEventListener('click',()=>{if(!scanImages.length){photoStorageMessage('Capture or restore photos first.');return;}scanImages.forEach((src,i)=>{const a=document.createElement('a');a.href=scanOcrImages[i]||src;a.download=`receipt-section-${i+1}.jpg`;document.body.append(a);a.click();a.remove();});photoStorageMessage(`Requested ${scanImages.length} photo downloads. Your browser may ask permission for multiple files.`);});
+document.querySelector('#ocr-clear-stored').addEventListener('click',async()=>{if(!confirm('Delete locally retained photos for the previous scan? Current selected photos will remain until you remove them.'))return;try{await receiptPhotoCache.clear();photoStorageMessage('Previous photo set deleted from local storage.');}catch(e){photoStorageMessage(e.message);}});
+receiptPhotoCache.get().then(saved=>{if(saved?.preview?.length)photoStorageMessage(`${saved.preview.length} previous photos available. Tap Retry previous photos to load them.`);}).catch(()=>{});
+
 function reviewField(name,value,uncertain) {
   const input=form.elements[name];if (!input || !value) return;
   input.value=value;
@@ -725,8 +741,8 @@ scanButton.addEventListener('click',async()=>{
           const originalText=original.data.text||'';
           let selectedText=originalText;
           let alternativeText='';
-          const enhanced=enhanceReceiptBand(bands[j]);
-          try {
+          const enhanced=receiptOcrItemScore(originalText)<2?enhanceReceiptBand(bands[j]):null;
+          if(enhanced)try {
             ocrStatus(`Comparing enhanced text, photo ${i+1}/${scanImages.length}, section ${j+1}/${bands.length}...`);
             const alternative=await worker.recognize(enhanced);
             alternativeText=alternative.data.text||'';
@@ -743,7 +759,7 @@ scanButton.addEventListener('click',async()=>{
           // append its raw text (which would duplicate existing purchases).
           // The occurrence-aware merge accepts only independently readable
           // UPC + price rows missing from the main reading.
-          if(j===0){
+          if(j===0 && receiptOcrItemScore(selectedText)<2){
             const upper=enlargedUpperReceiptRegion(bands[j]);
             if(upper){
               try {
@@ -757,7 +773,7 @@ scanButton.addEventListener('click',async()=>{
           // Additional narrow overlapping crops can recover product lines
           // that full-band and broad upper-region OCR skip.  Do not concatenate
           // the readings, which would duplicate repeated purchases.
-          if(j===0){
+          if(j===0 && receiptOcrItemScore(selectedText)<1){
             const regions=focusedFirstItemRegions(bands[j]);
             try {
               for(let k=0;k<regions.length;k++){
@@ -801,26 +817,36 @@ scanButton.addEventListener('click',async()=>{
 });
 window.resetOcrPhotos=()=>{scanImages=[];scanOcrImages=[];window.pendingOcrPhotos=[];scanText.value='';scanWarnings.textContent='';renderScanImages();};
 
-// Update 30: live camera guide; optional fallback to native camera remains available.
+// Update 34: guided camera with optional torch and guarded automatic overlap capture.
 (() => {
  const open=document.querySelector('#smart-camera-open'),ui=document.querySelector('#smart-camera-ui');
  const video=document.querySelector('#smart-camera-video'),frame=document.querySelector('#smart-camera-frame');
  const mode=document.querySelector('#smart-camera-mode'),feedback=document.querySelector('#smart-camera-feedback');
  const shoot=document.querySelector('#smart-camera-shoot'),close=document.querySelector('#smart-camera-close');
- let stream=null,interval=null,stable=0,busy=false,lastFrame=null,ready=false;
- const canvas=document.createElement('canvas');canvas.width=240;canvas.height=320;
+ const finish=document.querySelector('#smart-camera-finish'),torch=document.querySelector('#smart-camera-torch');
+ const overlay=document.querySelector('#smart-camera-overlap');
+ let stream=null,interval=null,stable=0,busy=false,lastFrame=null,ready=false,previousGray=null,lastCaptureAt=0,torchAvailable=false,torchState=false;
+ const canvas=document.createElement('canvas');canvas.width=160;canvas.height=240;
  const ctx=canvas.getContext('2d',{willReadFrequently:true});
  function syncCameraFrame(){if(video.videoWidth&&video.videoHeight){frame.style.setProperty('--camera-aspect',`${video.videoWidth} / ${video.videoHeight}`);frame.dataset.orientation=video.videoHeight>=video.videoWidth?'portrait':'landscape';}}
  video.addEventListener('loadedmetadata',syncCameraFrame);
- function stop(){if(interval)clearInterval(interval);interval=null;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;ui.hidden=true;open.hidden=false;stable=0;lastFrame=null;ready=false;frame.classList.remove('ready');frame.style.removeProperty('--camera-aspect');}
- async function capture(){if(!stream||busy||scanImages.length>=8)return;busy=true;try{const shot=document.createElement('canvas');shot.width=video.videoWidth;shot.height=video.videoHeight;shot.getContext('2d').drawImage(video,0,0,shot.width,shot.height);const blob=await new Promise(r=>shot.toBlob(r,'image/jpeg',.96));if(!blob)throw Error('Could not capture photo');const file=new File([blob],`receipt-${Date.now()}.jpg`,{type:'image/jpeg'});scanImages.push(await compressReceipt(file));scanOcrImages.push(await compressReceipt(file,4200,.94));renderScanImages();feedback.textContent=`Captured ${scanImages.length} of 8 photos. Reposition for another section or close camera.`;stable=0;}catch(e){feedback.textContent=e.message;}finally{busy=false;}}
- function inspect(){if(!stream||video.readyState<2||busy)return;ctx.drawImage(video,0,0,240,320);const pixels=ctx.getImageData(0,0,240,320).data;let sum=0,sumsq=0,edge=0,centerLight=0,centerCount=0,change=0;const gray=new Uint8Array(240*320);for(let y=0;y<320;y+=1)for(let x=0;x<240;x+=1){const i=y*240+x,k=i*4;const g=Math.round(.299*pixels[k]+.587*pixels[k+1]+.114*pixels[k+2]);gray[i]=g;sum+=g;sumsq+=g*g;if(x>25&&x<215&&y>25&&y<295){centerLight+=g;centerCount++;}if(lastFrame)change+=Math.abs(g-lastFrame[i]);}
- const avg=sum/gray.length,variance=sumsq/gray.length-avg*avg;for(let y=2;y<318;y+=2)for(let x=2;x<238;x+=2){const i=y*240+x;edge+=Math.abs(gray[i]-gray[i-1])+Math.abs(gray[i]-gray[i-240]);}
- const detail=edge/(119*158),motion=lastFrame?change/gray.length:999;lastFrame=gray;
- const issues=[];if(avg<75)issues.push('Add more light');if(avg>222)issues.push('Reduce glare / brightness');if(variance<850||detail<13)issues.push('Move closer or aim at printed text');if(motion>13)issues.push('Hold camera steady');
- ready=issues.length===0;frame.classList.toggle('ready',ready);feedback.textContent=ready?'Green — basic sharpness, light, and stability checks passed. Check that receipt text is fully visible.':'Red — '+issues.join('; ');
- if(mode.value==='auto'&&ready){stable++;if(stable>=4){stable=0;capture();}}else stable=0;
+ async function setTorch(value){const track=stream?.getVideoTracks()[0];if(!torchAvailable||!track)return;try{await track.applyConstraints({advanced:[{torch:!!value}]});torchState=!!value;}catch(e){torchAvailable=false;torch.value='off';feedback.textContent='Flashlight control unavailable on this camera. '+e.message;}}
+ torch.addEventListener('change',()=>{if(torch.value!=='auto')setTorch(torch.value==='on');});
+ function stop(){if(interval)clearInterval(interval);interval=null;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;ui.hidden=true;open.hidden=false;stable=0;lastFrame=null;previousGray=null;ready=false;frame.classList.remove('ready','has-overlap');frame.style.removeProperty('--camera-aspect');}
+ function grayscale(){ctx.drawImage(video,0,0,160,240);const rgba=ctx.getImageData(0,0,160,240).data,g=new Uint8Array(160*240);for(let i=0;i<g.length;i++)g[i]=Math.round(.299*rgba[i*4]+.587*rgba[i*4+1]+.114*rgba[i*4+2]);return g;}
+ // Compare a stripe from the previous photo against possible positions in the current preview.
+ // A match alone cannot prove complete receipt coverage; manual capture remains available.
+ function overlapScore(g){if(!previousGray)return {ok:true,score:0};let best=999;const w=160,top=153,rows=40;for(let offset=8;offset<=145;offset+=5){let error=0,count=0;for(let y=0;y<rows;y+=3)for(let x=24;x<136;x+=4){error+=Math.abs(previousGray[(top+y)*w+x]-g[(offset+y)*w+x]);count++;}best=Math.min(best,error/count);}return {ok:best<30,score:best};}
+ function showReference(){if(!previousGray)return;const data=ctx.createImageData(160,48);for(let y=0;y<48;y++)for(let x=0;x<160;x++){const v=previousGray[(145+y)*160+x],k=(y*160+x)*4;data.data[k]=v;data.data[k+1]=v;data.data[k+2]=v;data.data[k+3]=255;}const scratch=document.createElement('canvas');scratch.width=160;scratch.height=48;scratch.getContext('2d').putImageData(data,0,0);overlay.width=160;overlay.height=48;overlay.getContext('2d').drawImage(scratch,0,0);frame.classList.add('has-overlap');}
+ async function capture(){if(!stream||busy||scanImages.length>=8)return;busy=true;try{const current=grayscale();const shot=document.createElement('canvas');shot.width=video.videoWidth;shot.height=video.videoHeight;shot.getContext('2d').drawImage(video,0,0,shot.width,shot.height);const blob=await new Promise(r=>shot.toBlob(r,'image/jpeg',.94));if(!blob)throw Error('Could not capture photo');const file=new File([blob],`receipt-${Date.now()}.jpg`,{type:'image/jpeg'});scanImages.push(await compressReceipt(file));scanOcrImages.push(await compressReceipt(file,4200,.92));renderScanImages();retainCurrentPhotos();previousGray=current;showReference();lastCaptureAt=Date.now();feedback.textContent=`Captured ${scanImages.length} of 8. Move down and align the translucent reference, or tap Finish Receipt.`;stable=0;lastFrame=null;}catch(e){feedback.textContent=e.message;}finally{busy=false;}}
+ function inspect(){if(!stream||video.readyState<2||busy)return;const gray=grayscale();let sum=0,sumsq=0,edge=0,change=0;for(let i=0;i<gray.length;i++){const g=gray[i];sum+=g;sumsq+=g*g;if(lastFrame)change+=Math.abs(g-lastFrame[i]);}for(let y=2;y<238;y+=2)for(let x=2;x<158;x+=2){const i=y*160+x;edge+=Math.abs(gray[i]-gray[i-1])+Math.abs(gray[i]-gray[i-160]);}
+ const avg=sum/gray.length,variance=sumsq/gray.length-avg*avg,detail=edge/(78*118),motion=lastFrame?change/gray.length:999;lastFrame=gray;
+ const overlap=overlapScore(gray),issues=[];
+ if(avg<75)issues.push('Add light');if(avg>222)issues.push('Reduce glare');if(variance<850||detail<13)issues.push('Move closer / improve focus');if(motion>12)issues.push('Hold steady');if(previousGray&&!overlap.ok)issues.push('Align the previous section before moving down');
+ if(torch.value==='auto'&&torchAvailable){if(avg<70&&!torchState)setTorch(true);else if(avg>145&&torchState)setTorch(false);}
+ ready=issues.length===0;frame.classList.toggle('ready',ready);feedback.textContent=ready?(previousGray?'Green — alignment and basic quality checks passed.':'Green — basic quality checks passed. Check receipt edges.'):'Red — '+issues.join('; ');
+ if(mode.value==='auto'&&ready&&Date.now()-lastCaptureAt>2600){stable++;if(stable>=4){stable=0;capture();}}else stable=0;
  }
- open.addEventListener('click',async()=>{if(!navigator.mediaDevices?.getUserMedia){feedback.textContent='Live camera unavailable. Use Take photo instead.';ui.hidden=false;return;}try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1080},height:{ideal:1920},aspectRatio:{ideal:0.5625}},audio:false});video.srcObject=stream;await video.play();syncCameraFrame();ui.hidden=false;open.hidden=true;feedback.textContent='Point the camera at the receipt. The guide follows the live image; keep all desired text visible.';interval=setInterval(inspect,450);}catch(e){ui.hidden=false;feedback.textContent='Camera permission or access failed. Use Take photo instead. '+e.message;}});
- shoot.addEventListener('click',capture);close.addEventListener('click',stop);mode.addEventListener('change',()=>{stable=0;});document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});window.addEventListener('pagehide',stop);
+ open.addEventListener('click',async()=>{if(!navigator.mediaDevices?.getUserMedia){feedback.textContent='Live camera unavailable. Use Take photo instead.';ui.hidden=false;return;}try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1080},height:{ideal:1920},aspectRatio:{ideal:0.5625}},audio:false});video.srcObject=stream;await video.play();syncCameraFrame();ui.hidden=false;open.hidden=true;const track=stream.getVideoTracks()[0];torchAvailable=!!track.getCapabilities?.().torch;torch.disabled=!torchAvailable;torch.title=torchAvailable?'Flashlight supported':'This browser/camera does not expose flashlight controls';torch.value='off';torchState=false;previousGray=null;frame.classList.remove('has-overlap');feedback.textContent='Point the camera at the receipt. Automatic mode captures only after the guide turns green.';interval=setInterval(inspect,450);}catch(e){ui.hidden=false;feedback.textContent='Camera permission or access failed. Use Take photo instead. '+e.message;}});
+ shoot.addEventListener('click',capture);close.addEventListener('click',stop);finish.addEventListener('click',()=>{stop();ocrStatus(`${scanImages.length} photos ready. Tap Scan photos and fill form when ready.`);});mode.addEventListener('change',()=>{stable=0;});document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});window.addEventListener('pagehide',stop);
 })();

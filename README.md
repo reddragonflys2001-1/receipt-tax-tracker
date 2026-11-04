@@ -94,3 +94,11 @@ Use **Open smart camera** on HTTPS (GitHub Pages) and allow camera permission. T
 - Retain manual/automatic capture, multiple photos, and prior OCR behavior.
 
 Update 32: Removed two accidental camera-video references from OCR image processing that caused `video is not defined` during scans.
+
+
+## Update 34 (experimental)
+- Portrait camera with automatic capture quality checks and approximate overlap matching; manual Finish Receipt. Actual orientation depends on camera/browser support.
+- Torch Off/On/Auto where supported by Android Chrome camera track; otherwise disabled.
+- Last captured photo set retained locally in IndexedDB for Retry Previous Photos; optional Save Photos to Phone. Browser storage can be cleared by the device.
+- OCR skips some expensive enhancement and crop passes when the main recognition has readable product lines. This is a speed/accuracy tradeoff.
+- Duplicate merge logic from Update 33 remains; not guaranteed to remove every repeated row. Check item count, UPCs and subtotal before saving.
