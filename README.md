@@ -1,3 +1,8 @@
+# Receipt & Tax Tracker — Update 33
+
+Adds conservative multi-photo overlap detection for OCR UPC rows. The scanner compares ordered product UPC sequences between neighboring photos and removes repeated recognized lines only when a sufficiently distinctive matching sequence is found. Identical repeated purchases within one photo are retained. Ambiguous overlaps remain visible for manual review.
+
+Update 32 camera, OCR, and review behavior is preserved. This is an experimental improvement and may not resolve every duplicate or misread price. Review all products before saving.
 Update 28: targeted overlapping upper-receipt OCR crops with contrast pass; retains occurrence-aware UPC/price merge and blank-price review.
 
 Receipt & Tax Tracker — Stage 9 Update 18

@@ -180,6 +180,58 @@ function mergeReceiptBandReadings(primary, alternate) {
   a.splice(insert,0,...extras.map(x=>x.line));
   return a.join('\n');
 }
+// Update 33: remove OCR readings of the same physical rows where adjacent
+// close-up photos overlap. Compare ordered UPC sequences, NOT product names:
+// identical UPCs can be legitimate purchases on different printed lines.
+// A merge needs two corroborating lines and a distinct UPC anchor. If the
+// alignment is ambiguous, keep both and flag the receipt for manual review.
+function mergeOverlappingReceiptPhotos(photoTexts) {
+  const signature = line => {
+    const m=line.match(/\b(\d[\d ]{8,16}\d)K?\s+(?:[FNTO]\s+)?\$?\s*(\d{1,4}[.,]\d{2})\s*[XNTO0]?\s*$/i);
+    if(!m)return null;
+    const upc=m[1].replace(/\s/g,'');
+    if(upc.length<10||upc.length>14)return null;
+    const name=line.slice(0,m.index).replace(/^[^A-Za-z]+/,'').trim();
+    if(!/[A-Za-z]{3}/.test(name))return null;
+    return upc;
+  };
+  const entries=lines=>lines.map((line,index)=>({index,upc:signature(line)})).filter(x=>x.upc);
+  const output=[];
+  const reports=[];
+  for(let p=0;p<photoTexts.length;p++){
+    const next=photoTexts[p].split(/\r?\n/);
+    if(!output.length){output.push(...next);continue;}
+    const prior=entries(output), current=entries(next);
+    let best=null;
+    // Search for a contiguous run of shared UPCs at the end of one photo
+    // and start of the next. Permit a few extra rows outside the overlap.
+    for(let a=Math.max(0,prior.length-16);a<prior.length;a++){
+      for(let b=0;b<Math.min(current.length,12);b++){
+        let n=0;
+        while(a+n<prior.length && b+n<current.length && prior[a+n].upc===current[b+n].upc)n++;
+        if(n<2)continue;
+        const distinct=new Set(prior.slice(a,a+n).map(x=>x.upc)).size;
+        if(distinct<2)continue; // repeated identical items alone are ambiguous
+        // Require a near-edge overlap, rather than matching a repeated product
+        // group from distant parts of the receipt.
+        const trailing=prior.length-(a+n), leading=b;
+        if(trailing>3||leading>3)continue;
+        const score=n*10-trailing*2-leading*2;
+        if(!best||score>best.score)best={a,b,n,score};
+      }
+    }
+    if(best){
+      const remove=new Set(current.slice(best.b,best.b+best.n).map(x=>x.index));
+      // Do not remove text before the overlap (e.g. store metadata) or after.
+      output.push(...next.filter((_,i)=>!remove.has(i)));
+      reports.push(`Photos ${p}–${p+1}: removed ${remove.size} repeated UPC rows from overlapping images.`);
+    }else{
+      output.push(...next);
+      if(prior.length && current.length)reports.push(`Photos ${p}–${p+1}: overlap uncertain; no product rows removed. Review duplicates.`);
+    }
+  }
+  return {text:output.join('\n'),reports};
+}
 // A stray OCR echo can appear in the blank gap between the last purchase
 // and SUBTOTAL. Only suppress it for item extraction when the same UPC AND
 // price were already read above, and the echo is isolated by a blank line.
@@ -661,9 +713,11 @@ scanButton.addEventListener('click',async()=>{
     if(!window.Tesseract) throw new Error('OCR library could not load. Check your internet connection and reload.');
     const worker=await Tesseract.createWorker('eng',1,{logger:m=>{if(m.status==='recognizing text')ocrStatus(`Recognizing text: ${Math.round((m.progress||0)*100)}%`);}});
     let texts=[];
+    const photoTexts=[];
     const supplementalDiagnostics=[];
     try {
       for(let i=0;i<scanImages.length;i++){
+        const photoParts=[];
         const bands=await receiptOcrBands(scanOcrImages[i]||scanImages[i]);
         for(let j=0;j<bands.length;j++){
           ocrStatus(`Scanning photo ${i+1}/${scanImages.length}, section ${j+1}/${bands.length}...`);
@@ -724,19 +778,21 @@ scanButton.addEventListener('click',async()=>{
               }
             } finally {for(const region of regions){region.width=0;region.height=0;}}
           }
-          texts.push(selectedText);
+          photoParts.push(selectedText);
           bands[j].width=0;bands[j].height=0;
         }
+        photoTexts.push(photoParts.join('\n'));
       }
     }
     finally {await worker.terminate();}
-    const combined=texts.join('\n');scanText.value=combined + (supplementalDiagnostics.length ? '\n\n===== UPDATE 29 DIAGNOSTICS (NOT USED FOR PRODUCT EXTRACTION) =====\n' + supplementalDiagnostics.join('\n\n-----\n') : '');
+    const photoMerge=mergeOverlappingReceiptPhotos(photoTexts);
+    const combined=photoMerge.text;scanText.value=combined + (supplementalDiagnostics.length ? '\n\n===== UPDATE 33 DIAGNOSTICS (NOT USED FOR PRODUCT EXTRACTION) =====\n' + supplementalDiagnostics.join('\n\n-----\n') : '');
     const footerCheck=suppressIsolatedFooterEcho(combined);
     // Clear prior OCR suggestions only, leave existing manual fields/taxes intact.
     document.querySelectorAll('.ocr-uncertain').forEach(el=>el.classList.remove('ocr-uncertain'));
     const parsed=parseReceiptText(footerCheck.text);
     if(scanImages.length){pendingPhoto=scanImages[0];window.pendingOcrPhotos=[...scanImages];}
-    scanWarnings.textContent=`${footerCheck.suppressed.length ? footerCheck.suppressed.length+" isolated duplicate near SUBTOTAL excluded from item suggestions; verify against the photo. " : ""}OCR suggested ${parsed.fields.join(', ')||'no standard fields'} and ${parsed.taxCount} tax suggestion(s), plus ${parsed.itemCount} possible item(s). ${parsed.soldCount&&parsed.itemCount<parsed.soldCount?`Receipt says ${parsed.soldCount} items sold but only ${parsed.itemCount} item rows were recognized. Do not treat the item list as complete. `:''}${parsed.uncertainItems?parsed.uncertainItems+" item match(es) need extra review. ":""}${parsed.totalFromPayment?"Total was suggested from a payment line. ":""}${parsed.itemReconciliationWarning||''}${parsed.itemCount===0?' No products were extracted: check OCR product lines and review manually. ':''}${parsed.estimatedTax?"A possible tax was estimated from the difference; it is NOT verified printed tax. ":""}${parsed.pendingTaxReview?"A printed tax label was detected but the amount was unreadable. Review and classify the suggested amount before saving. ":""}${parsed.subtotalInferred?"Subtotal was calculated as total minus the readable printed tax. Verify it against the receipt before saving. ":""}Verify every field, tax and item before saving. Never add a calculated tax estimate on top of a printed tax. Only the first photo is shown in older receipt views; all optimized photos are saved in the receipt record.`;
+    scanWarnings.textContent=`${photoMerge.reports.join(' ')} ${footerCheck.suppressed.length ? footerCheck.suppressed.length+" isolated duplicate near SUBTOTAL excluded from item suggestions; verify against the photo. " : ""}OCR suggested ${parsed.fields.join(', ')||'no standard fields'} and ${parsed.taxCount} tax suggestion(s), plus ${parsed.itemCount} possible item(s). ${parsed.soldCount&&parsed.itemCount<parsed.soldCount?`Receipt says ${parsed.soldCount} items sold but only ${parsed.itemCount} item rows were recognized. Do not treat the item list as complete. `:''}${parsed.uncertainItems?parsed.uncertainItems+" item match(es) need extra review. ":""}${parsed.totalFromPayment?"Total was suggested from a payment line. ":""}${parsed.itemReconciliationWarning||''}${parsed.itemCount===0?' No products were extracted: check OCR product lines and review manually. ':''}${parsed.estimatedTax?"A possible tax was estimated from the difference; it is NOT verified printed tax. ":""}${parsed.pendingTaxReview?"A printed tax label was detected but the amount was unreadable. Review and classify the suggested amount before saving. ":""}${parsed.subtotalInferred?"Subtotal was calculated as total minus the readable printed tax. Verify it against the receipt before saving. ":""}Verify every field, tax and item before saving. Never add a calculated tax estimate on top of a printed tax. Only the first photo is shown in older receipt views; all optimized photos are saved in the receipt record.`;
     ocrStatus('Scan complete. Review highlighted fields and the receipt photo before saving.');
     document.dispatchEvent(new Event('receipt-ocr-complete'));
     form.scrollIntoView({behavior:'smooth',block:'start'});
