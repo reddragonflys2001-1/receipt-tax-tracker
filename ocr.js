@@ -842,16 +842,36 @@ window.resetOcrPhotos=()=>{scanImages=[];scanOcrImages=[];window.pendingOcrPhoto
  function grayscale(){drawPortrait(ctx,160,240);const rgba=ctx.getImageData(0,0,160,240).data,g=new Uint8Array(160*240);for(let i=0;i<g.length;i++)g[i]=Math.round(.299*rgba[i*4]+.587*rgba[i*4+1]+.114*rgba[i*4+2]);return g;}
  // Compare a stripe from the previous photo against possible positions in the current preview.
  // A match alone cannot prove complete receipt coverage; manual capture remains available.
- function overlapScore(g){if(!previousGray)return {ok:true,score:0,offset:0};let best=999,bestOffset=-1;const w=160,top=153,rows=40;
- // Require the old bottom section to move into the upper half of the new
- // portrait frame, ensuring substantial new content before auto-capture.
- for(let offset=10;offset<=88;offset+=3){let error=0,count=0;for(let y=0;y<rows;y+=3)for(let x=24;x<136;x+=4){error+=Math.abs(previousGray[(top+y)*w+x]-g[(offset+y)*w+x]);count++;}const score=error/count;if(score<best){best=score;bestOffset=offset;}}
- return {ok:best<24,score:best,offset:bestOffset};}
- function showReference(){if(!previousGray)return;const data=ctx.createImageData(160,48);for(let y=0;y<48;y++)for(let x=0;x<160;x++){const v=previousGray[(145+y)*160+x],k=(y*160+x)*4;data.data[k]=v;data.data[k+1]=v;data.data[k+2]=v;data.data[k+3]=255;}overlay.width=160;overlay.height=48;overlay.getContext('2d').putImageData(data,0,0);frame.classList.add('has-overlap');}
+ // Compare the bottom 48 rows of the previous *captured portrait frame* to
+ // the fixed overlay area near the top of the next portrait frame.
+ // Do not move the overlay to the best match: it is a stationary visual target.
+ function overlapScore(g){
+  if(!previousGray)return {ok:true,score:0};
+  const w=160,referenceTop=192,targetTop=24,rows=48;
+  let error=0,count=0,texture=0;
+  for(let y=2;y<rows-2;y+=2)for(let x=20;x<140;x+=3){
+   const old=previousGray[(referenceTop+y)*w+x],now=g[(targetTop+y)*w+x];
+   error+=Math.abs(old-now);texture+=Math.abs(old-previousGray[(referenceTop+y)*w+x-2]);count++;
+  }
+  const score=error/count;
+  // Avoid accepting a featureless white/gray stripe as a good alignment.
+  return {ok:score<24&&texture/count>5,score};
+ }
+ function showReference(){
+  if(!previousGray)return;
+  const data=ctx.createImageData(160,48);
+  for(let y=0;y<48;y++)for(let x=0;x<160;x++){
+   const v=previousGray[(192+y)*160+x],k=(y*160+x)*4;
+   data.data[k]=v;data.data[k+1]=v;data.data[k+2]=v;data.data[k+3]=255;
+  }
+  overlay.width=160;overlay.height=48;
+  overlay.getContext('2d').putImageData(data,0,0);
+  overlay.style.top='10%';frame.classList.add('has-overlap');
+ }
  async function capture(){if(!stream||busy||scanImages.length>=8)return;busy=true;try{const current=grayscale();const shot=document.createElement('canvas');const crop=portraitCrop();shot.width=Math.round(crop.sw);shot.height=Math.round(crop.sh);drawPortrait(shot.getContext('2d'),shot.width,shot.height);const blob=await new Promise(r=>shot.toBlob(r,'image/jpeg',.94));if(!blob)throw Error('Could not capture photo');const file=new File([blob],`receipt-${Date.now()}.jpg`,{type:'image/jpeg'});scanImages.push(await compressReceipt(file));scanOcrImages.push(await compressReceipt(file,4200,.92));renderScanImages();retainCurrentPhotos();previousGray=current;showReference();lastCaptureAt=Date.now();feedback.textContent=`Captured ${scanImages.length} of 8. Move down and align the translucent reference, or tap Finish Receipt.`;stable=0;lastFrame=null;}catch(e){feedback.textContent=e.message;}finally{busy=false;}}
  function inspect(){if(!stream||video.readyState<2||busy)return;const gray=grayscale();let sum=0,sumsq=0,edge=0,change=0;for(let i=0;i<gray.length;i++){const g=gray[i];sum+=g;sumsq+=g*g;if(lastFrame)change+=Math.abs(g-lastFrame[i]);}for(let y=2;y<238;y+=2)for(let x=2;x<158;x+=2){const i=y*160+x;edge+=Math.abs(gray[i]-gray[i-1])+Math.abs(gray[i]-gray[i-160]);}
  const avg=sum/gray.length,variance=sumsq/gray.length-avg*avg,detail=edge/(78*118),motion=lastFrame?change/gray.length:999;lastFrame=gray;
- const overlap=overlapScore(gray),issues=[];if(previousGray&&overlap.offset>=0)overlay.style.top=`${overlap.offset/240*100}%`;
+ const overlap=overlapScore(gray),issues=[];
  if(avg<75)issues.push('Add light');if(avg>222)issues.push('Reduce glare');if(variance<850||detail<13)issues.push('Move closer / improve focus');if(motion>12)issues.push('Hold steady');if(previousGray&&!overlap.ok)issues.push('Move down until the previous lines match the bright overlay');
  if(torch.value==='auto'&&torchAvailable){if(avg<70&&!torchState)setTorch(true);else if(avg>145&&torchState)setTorch(false);}
  ready=issues.length===0;frame.classList.toggle('ready',ready);feedback.textContent=ready?(previousGray?'Green — alignment and quality checks passed. Auto-capture is preparing.':'Green — quality checks passed. Auto-capture is preparing.'):'Red — '+issues.join('; ');

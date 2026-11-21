@@ -1,3 +1,7 @@
+## Update 36 — Fixed portrait alignment reference
+
+The previous-photo reference is now taken from the bottom 20% of the captured portrait image and displayed in a stationary overlay at the top of the next live preview. The matching check compares against that same fixed region, rather than moving the overlay to chase the best match. Existing auto capture, flashlight, and photo-retention controls remain. Camera behavior requires on-device testing. Duplicate OCR item extraction is not yet resolved.
+
 Update 35: portrait guided capture and improved alignment overlay. Camera frames and saved photos now use the same centered 3:4 portrait crop, even when Android supplies a landscape camera stream. A high-contrast adjustable overlay shows previous lines; automatic capture requires the old bottom section to align within the upper portion of the new image. Existing OCR merge remains experimental; do not assume duplicate rows are fully fixed.
 
 # Receipt & Tax Tracker — Update 33
