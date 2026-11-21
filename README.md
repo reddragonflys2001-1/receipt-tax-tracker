@@ -1,3 +1,10 @@
+Update 41 — Automatic capture readiness timer fix
+
+- Preserves capture progress through very brief quality-check flickers, but only triggers on a frame when all four checks are currently passing.
+- Shows automatic-capture percentage and any blocking check in the camera status line.
+- Preserves overlap matching, manual capture, photo retention, torch, and OCR.
+- Needs real Android camera testing; automatic capture has not been verified on device.
+
 ## Update 40 — automatic second-photo overlap matching
 
 - Replaced overly strict pixel-by-pixel comparison with exposure-tolerant edge correlation over a wider search region.
