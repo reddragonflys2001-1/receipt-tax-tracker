@@ -1,3 +1,11 @@
+## Update 40 — automatic second-photo overlap matching
+
+- Replaced overly strict pixel-by-pixel comparison with exposure-tolerant edge correlation over a wider search region.
+- Separately labels the overlap requirement and shows the actual blocking condition.
+- Keeps automatic capture guarded by focus, lighting, stability and overlap; manual capture remains available.
+- Updated service-worker cache name to force refresh.
+- Device testing required: the new overlap threshold is a starting point, not validated against a real Android camera yet.
+
 Update 37: Fixed, undistorted reference strip. Overlay retains its 160:48 aspect ratio, uses a fixed CSS anchor and stronger contrast, and is not repositioned during automatic quality checks. Camera behavior still requires testing on Android.
 
 ## Update 36 — Fixed portrait alignment reference
