@@ -144,3 +144,5 @@ footer{text-align:center;color:var(--muted);padding:20px;font-size:.85rem}
  border:2px solid #ffe25d;box-sizing:border-box;background:rgba(255,255,255,.14);
 }
 .smart-camera-frame .smart-camera-overlap-label{top:9%;right:6%;}
+
+.smart-camera-quality{font-size:.9rem;line-height:1.6;padding:9px 12px;border:1px solid #b9c9c2;border-radius:8px;background:#f3f8f5;color:#174b39;max-width:460px;}

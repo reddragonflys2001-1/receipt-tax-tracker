@@ -119,3 +119,10 @@ Update 32: Removed two accidental camera-video references from OCR image process
 - A 1.8-second minimum gap between photos remains to allow repositioning.
 - Matching still requires textured printed lines; if alignment fails, use manual capture.
 - This update does not fix duplicate OCR entries. Test on your Android device before relying on it.
+
+## Update 39: Smoothed camera quality checks
+- Smooths focus, lighting, and motion samples over time to reduce red/green flicker.
+- Uses separate pass/fail thresholds to prevent small changes from immediately failing a passed check.
+- Displays separate Focus, Lighting, Stability, and Alignment indicators.
+- Preserves the 0.5-second auto-capture confirmation and manual capture fallback.
+- Requires on-device testing; duplicate OCR entries are not addressed by this camera-focused update.
