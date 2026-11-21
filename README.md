@@ -1,3 +1,7 @@
+## Update 43 — Receipt guide CSS fix
+
+Fixed a conflicting CSS `inset-inline:unset` declaration that overrode the dynamically controlled left/right positioning guide boundaries. Both dashed edges should now appear and respond to manual sliders. This change does not alter camera detection logic.
+
 Update 41 — Automatic capture readiness timer fix
 
 - Preserves capture progress through very brief quality-check flickers, but only triggers on a frame when all four checks are currently passing.
