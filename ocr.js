@@ -827,7 +827,7 @@ window.resetOcrPhotos=()=>{scanImages=[];scanOcrImages=[];window.pendingOcrPhoto
  const overlay=document.querySelector('#smart-camera-overlap');
  const opacity=document.querySelector('#smart-camera-opacity'),opacityValue=document.querySelector('#smart-camera-opacity-value');
  opacity.addEventListener('input',()=>{frame.style.setProperty('--overlap-opacity',opacity.value/100);opacityValue.textContent=opacity.value+'%';});
- let stream=null,interval=null,stable=0,busy=false,lastFrame=null,ready=false,previousGray=null,lastCaptureAt=0,torchAvailable=false,torchState=false;
+ let stream=null,interval=null,stable=0,busy=false,lastFrame=null,ready=false,previousGray=null,lastCaptureAt=0,torchAvailable=false,torchState=false,goodSince=0;
  const canvas=document.createElement('canvas');canvas.width=160;canvas.height=240;
  const ctx=canvas.getContext('2d',{willReadFrequently:true});
  // Display and capture the same centered portrait crop. Many Android rear-camera
@@ -838,7 +838,7 @@ window.resetOcrPhotos=()=>{scanImages=[];scanOcrImages=[];window.pendingOcrPhoto
  video.addEventListener('loadedmetadata',syncCameraFrame);
  async function setTorch(value){const track=stream?.getVideoTracks()[0];if(!torchAvailable||!track)return;try{await track.applyConstraints({advanced:[{torch:!!value}]});torchState=!!value;}catch(e){torchAvailable=false;torch.value='off';feedback.textContent='Flashlight control unavailable on this camera. '+e.message;}}
  torch.addEventListener('change',()=>{if(torch.value!=='auto')setTorch(torch.value==='on');});
- function stop(){if(interval)clearInterval(interval);interval=null;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;ui.hidden=true;open.hidden=false;stable=0;lastFrame=null;previousGray=null;ready=false;frame.classList.remove('ready','has-overlap');overlay.getContext('2d').clearRect(0,0,overlay.width,overlay.height);frame.style.removeProperty('--camera-aspect');}
+ function stop(){if(interval)clearInterval(interval);interval=null;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;ui.hidden=true;open.hidden=false;stable=0;goodSince=0;lastFrame=null;previousGray=null;ready=false;frame.classList.remove('ready','has-overlap');overlay.getContext('2d').clearRect(0,0,overlay.width,overlay.height);frame.style.removeProperty('--camera-aspect');}
  function grayscale(){drawPortrait(ctx,160,240);const rgba=ctx.getImageData(0,0,160,240).data,g=new Uint8Array(160*240);for(let i=0;i<g.length;i++)g[i]=Math.round(.299*rgba[i*4]+.587*rgba[i*4+1]+.114*rgba[i*4+2]);return g;}
  // Compare a stripe from the previous photo against possible positions in the current preview.
  // A match alone cannot prove complete receipt coverage; manual capture remains available.
@@ -847,15 +847,26 @@ window.resetOcrPhotos=()=>{scanImages=[];scanOcrImages=[];window.pendingOcrPhoto
  // Do not move the overlay to the best match: it is a stationary visual target.
  function overlapScore(g){
   if(!previousGray)return {ok:true,score:0};
+  // Allow a small amount of hand drift without moving the visible overlay.
+  // Search around its fixed target, using textured reference pixels only.
   const w=160,referenceTop=192,targetTop=24,rows=48;
-  let error=0,count=0,texture=0;
-  for(let y=2;y<rows-2;y+=2)for(let x=20;x<140;x+=3){
-   const old=previousGray[(referenceTop+y)*w+x],now=g[(targetTop+y)*w+x];
-   error+=Math.abs(old-now);texture+=Math.abs(old-previousGray[(referenceTop+y)*w+x-2]);count++;
+  let best=Infinity,bestTexture=0;
+  for(let dy=-12;dy<=12;dy+=3)for(let dx=-12;dx<=12;dx+=3){
+   let error=0,texture=0,count=0;
+   for(let y=4;y<rows-4;y+=3)for(let x=24;x<136;x+=3){
+    const oldIndex=(referenceTop+y)*w+x;
+    const contrast=Math.abs(previousGray[oldIndex]-previousGray[oldIndex-2]);
+    if(contrast<7)continue;
+    const nowIndex=(targetTop+y+dy)*w+x+dx;
+    error+=Math.abs(previousGray[oldIndex]-g[nowIndex]);texture+=contrast;count++;
+   }
+   if(count<85)continue;
+   const score=error/count;
+   if(score<best){best=score;bestTexture=texture/count;}
   }
-  const score=error/count;
-  // Avoid accepting a featureless white/gray stripe as a good alignment.
-  return {ok:score<24&&texture/count>5,score};
+  // Keep a meaningful match requirement: a blank or unrelated section must
+  // not trigger capture just because the phone is steady.
+  return {ok:best<38&&bestTexture>9,score:best};
  }
  function showReference(){
   if(!previousGray)return;
@@ -870,15 +881,15 @@ window.resetOcrPhotos=()=>{scanImages=[];scanOcrImages=[];window.pendingOcrPhoto
   overlay.getContext('2d').putImageData(data,0,0);
   frame.classList.add('has-overlap');
  }
- async function capture(){if(!stream||busy||scanImages.length>=8)return;busy=true;try{const current=grayscale();const shot=document.createElement('canvas');const crop=portraitCrop();shot.width=Math.round(crop.sw);shot.height=Math.round(crop.sh);drawPortrait(shot.getContext('2d'),shot.width,shot.height);const blob=await new Promise(r=>shot.toBlob(r,'image/jpeg',.94));if(!blob)throw Error('Could not capture photo');const file=new File([blob],`receipt-${Date.now()}.jpg`,{type:'image/jpeg'});scanImages.push(await compressReceipt(file));scanOcrImages.push(await compressReceipt(file,4200,.92));renderScanImages();retainCurrentPhotos();previousGray=current;showReference();lastCaptureAt=Date.now();feedback.textContent=`Captured ${scanImages.length} of 8. Move down and align the translucent reference, or tap Finish Receipt.`;stable=0;lastFrame=null;}catch(e){feedback.textContent=e.message;}finally{busy=false;}}
+ async function capture(){if(!stream||busy||scanImages.length>=8)return;busy=true;try{const current=grayscale();const shot=document.createElement('canvas');const crop=portraitCrop();shot.width=Math.round(crop.sw);shot.height=Math.round(crop.sh);drawPortrait(shot.getContext('2d'),shot.width,shot.height);const blob=await new Promise(r=>shot.toBlob(r,'image/jpeg',.94));if(!blob)throw Error('Could not capture photo');const file=new File([blob],`receipt-${Date.now()}.jpg`,{type:'image/jpeg'});scanImages.push(await compressReceipt(file));scanOcrImages.push(await compressReceipt(file,4200,.92));renderScanImages();retainCurrentPhotos();previousGray=current;showReference();lastCaptureAt=Date.now();feedback.textContent=`Captured ${scanImages.length} of 8. Move down and align the translucent reference, or tap Finish Receipt.`;stable=0;goodSince=0;lastFrame=null;}catch(e){feedback.textContent=e.message;}finally{busy=false;}}
  function inspect(){if(!stream||video.readyState<2||busy)return;const gray=grayscale();let sum=0,sumsq=0,edge=0,change=0;for(let i=0;i<gray.length;i++){const g=gray[i];sum+=g;sumsq+=g*g;if(lastFrame)change+=Math.abs(g-lastFrame[i]);}for(let y=2;y<238;y+=2)for(let x=2;x<158;x+=2){const i=y*160+x;edge+=Math.abs(gray[i]-gray[i-1])+Math.abs(gray[i]-gray[i-160]);}
  const avg=sum/gray.length,variance=sumsq/gray.length-avg*avg,detail=edge/(78*118),motion=lastFrame?change/gray.length:999;lastFrame=gray;
  const overlap=overlapScore(gray),issues=[];
- if(avg<75)issues.push('Add light');if(avg>222)issues.push('Reduce glare');if(variance<850||detail<13)issues.push('Move closer / improve focus');if(motion>12)issues.push('Hold steady');if(previousGray&&!overlap.ok)issues.push('Move down until the previous lines match the bright overlay');
+ if(avg<75)issues.push('Add light');if(avg>222)issues.push('Reduce glare');if(variance<850||detail<13)issues.push('Move closer / improve focus');if(motion>19)issues.push('Hold steady');if(previousGray&&!overlap.ok)issues.push('Move down and align the last lines (small movements are OK)');
  if(torch.value==='auto'&&torchAvailable){if(avg<70&&!torchState)setTorch(true);else if(avg>145&&torchState)setTorch(false);}
  ready=issues.length===0;frame.classList.toggle('ready',ready);feedback.textContent=ready?(previousGray?'Green — alignment and quality checks passed. Auto-capture is preparing.':'Green — quality checks passed. Auto-capture is preparing.'):'Red — '+issues.join('; ');
- if(mode.value==='auto'&&ready&&Date.now()-lastCaptureAt>2600){stable++;if(stable>=4){stable=0;capture();}}else stable=0;
+ if(mode.value==='auto'&&ready&&Date.now()-lastCaptureAt>1800){if(!goodSince)goodSince=Date.now();if(Date.now()-goodSince>=500){goodSince=0;capture();}}else goodSince=0;
  }
- open.addEventListener('click',async()=>{if(!navigator.mediaDevices?.getUserMedia){feedback.textContent='Live camera unavailable. Use Take photo instead.';ui.hidden=false;return;}try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1080},height:{ideal:1920},aspectRatio:{ideal:0.5625}},audio:false});video.srcObject=stream;await video.play();syncCameraFrame();ui.hidden=false;open.hidden=true;const track=stream.getVideoTracks()[0];torchAvailable=!!track.getCapabilities?.().torch;torch.disabled=!torchAvailable;torch.title=torchAvailable?'Flashlight supported':'This browser/camera does not expose flashlight controls';torch.value='off';torchState=false;previousGray=null;frame.classList.remove('has-overlap');feedback.textContent='Point the camera at the receipt. Automatic mode captures only after the guide turns green.';interval=setInterval(inspect,450);}catch(e){ui.hidden=false;feedback.textContent='Camera permission or access failed. Use Take photo instead. '+e.message;}});
- shoot.addEventListener('click',capture);close.addEventListener('click',stop);finish.addEventListener('click',()=>{stop();ocrStatus(`${scanImages.length} photos ready. Tap Scan photos and fill form when ready.`);});mode.addEventListener('change',()=>{stable=0;});document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});window.addEventListener('pagehide',stop);
+ open.addEventListener('click',async()=>{if(!navigator.mediaDevices?.getUserMedia){feedback.textContent='Live camera unavailable. Use Take photo instead.';ui.hidden=false;return;}try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1080},height:{ideal:1920},aspectRatio:{ideal:0.5625}},audio:false});video.srcObject=stream;await video.play();syncCameraFrame();ui.hidden=false;open.hidden=true;const track=stream.getVideoTracks()[0];torchAvailable=!!track.getCapabilities?.().torch;torch.disabled=!torchAvailable;torch.title=torchAvailable?'Flashlight supported':'This browser/camera does not expose flashlight controls';torch.value='off';torchState=false;previousGray=null;frame.classList.remove('has-overlap');feedback.textContent='Point the camera at the receipt. Automatic mode captures only after the guide turns green.';interval=setInterval(inspect,180);}catch(e){ui.hidden=false;feedback.textContent='Camera permission or access failed. Use Take photo instead. '+e.message;}});
+ shoot.addEventListener('click',capture);close.addEventListener('click',stop);finish.addEventListener('click',()=>{stop();ocrStatus(`${scanImages.length} photos ready. Tap Scan photos and fill form when ready.`);});mode.addEventListener('change',()=>{stable=0;goodSince=0;});document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});window.addEventListener('pagehide',stop);
 })();

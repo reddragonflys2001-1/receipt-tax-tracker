@@ -110,3 +110,12 @@ Update 32: Removed two accidental camera-video references from OCR image process
 - Last captured photo set retained locally in IndexedDB for Retry Previous Photos; optional Save Photos to Phone. Browser storage can be cleared by the device.
 - OCR skips some expensive enhancement and crop passes when the main recognition has readable product lines. This is a speed/accuracy tradeoff.
 - Duplicate merge logic from Update 33 remains; not guaranteed to remove every repeated row. Check item count, UPCs and subtotal before saving.
+
+
+## Update 38: More forgiving guided auto-capture
+- Fixed reference stays stationary; alignment matching allows up to 12 low-resolution pixels of movement in each direction.
+- Motion threshold relaxed from 12 to 19, while focus and lighting checks remain active.
+- Auto-capture requires approximately 500 ms of continuous acceptable checks, evaluated every 180 ms.
+- A 1.8-second minimum gap between photos remains to allow repositioning.
+- Matching still requires textured printed lines; if alignment fails, use manual capture.
+- This update does not fix duplicate OCR entries. Test on your Android device before relying on it.
