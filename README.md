@@ -141,3 +141,11 @@ Update 32: Removed two accidental camera-video references from OCR image process
 - Displays separate Focus, Lighting, Stability, and Alignment indicators.
 - Preserves the 0.5-second auto-capture confirmation and manual capture fallback.
 - Requires on-device testing; duplicate OCR entries are not addressed by this camera-focused update.
+
+
+## Update 42 — Adaptive Guided Camera (experimental)
+- Adaptive receipt edge guide using brightness transitions, with manually adjustable left/right edges. Manual guide remains fixed through the current scan and resets when camera closes.
+- First automatic capture requires detectable receipt boundaries or manual guide adjustment as well as focus, lighting, and stability.
+- Subsequent captures use a more tolerant vertical text-line pattern overlap check.
+- Capture progress is always shown in automatic mode, including when overlap blocks capture.
+- Device camera testing is required; edge detection may fail on low-contrast backgrounds.

@@ -146,3 +146,8 @@ footer{text-align:center;color:var(--muted);padding:20px;font-size:.85rem}
 .smart-camera-frame .smart-camera-overlap-label{top:9%;right:6%;}
 
 .smart-camera-quality{font-size:.9rem;line-height:1.6;padding:9px 12px;border:1px solid #b9c9c2;border-radius:8px;background:#f3f8f5;color:#174b39;max-width:460px;}
+
+/* Update 42: adaptive receipt boundaries and manual fallback */
+#smart-camera-guide{left:var(--receipt-left,14%);right:var(--receipt-right,14%);top:5%;bottom:5%;inset-block:5%;inset-inline:unset;border:3px dashed #47e883;box-shadow:0 0 0 999px rgba(0,0,0,.08);z-index:2;}
+#smart-camera-frame.has-overlap #smart-camera-guide{border-color:#47e883;}
+.guide-settings{max-width:460px;padding:8px 0}.guide-settings label{display:block;margin:5px 0}.guide-settings input[type=range]{width:100%;max-width:420px}.guide-settings [hidden]{display:none}
