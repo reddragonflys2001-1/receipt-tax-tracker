@@ -1,3 +1,5 @@
+Update 37: Fixed, undistorted reference strip. Overlay retains its 160:48 aspect ratio, uses a fixed CSS anchor and stronger contrast, and is not repositioned during automatic quality checks. Camera behavior still requires testing on Android.
+
 ## Update 36 — Fixed portrait alignment reference
 
 The previous-photo reference is now taken from the bottom 20% of the captured portrait image and displayed in a stationary overlay at the top of the next live preview. The matching check compares against that same fixed region, rather than moving the overlay to chase the best match. Existing auto capture, flashlight, and photo-retention controls remain. Camera behavior requires on-device testing. Duplicate OCR item extraction is not yet resolved.

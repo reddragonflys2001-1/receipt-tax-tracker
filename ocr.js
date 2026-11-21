@@ -838,7 +838,7 @@ window.resetOcrPhotos=()=>{scanImages=[];scanOcrImages=[];window.pendingOcrPhoto
  video.addEventListener('loadedmetadata',syncCameraFrame);
  async function setTorch(value){const track=stream?.getVideoTracks()[0];if(!torchAvailable||!track)return;try{await track.applyConstraints({advanced:[{torch:!!value}]});torchState=!!value;}catch(e){torchAvailable=false;torch.value='off';feedback.textContent='Flashlight control unavailable on this camera. '+e.message;}}
  torch.addEventListener('change',()=>{if(torch.value!=='auto')setTorch(torch.value==='on');});
- function stop(){if(interval)clearInterval(interval);interval=null;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;ui.hidden=true;open.hidden=false;stable=0;lastFrame=null;previousGray=null;ready=false;frame.classList.remove('ready','has-overlap');frame.style.removeProperty('--camera-aspect');}
+ function stop(){if(interval)clearInterval(interval);interval=null;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;ui.hidden=true;open.hidden=false;stable=0;lastFrame=null;previousGray=null;ready=false;frame.classList.remove('ready','has-overlap');overlay.getContext('2d').clearRect(0,0,overlay.width,overlay.height);frame.style.removeProperty('--camera-aspect');}
  function grayscale(){drawPortrait(ctx,160,240);const rgba=ctx.getImageData(0,0,160,240).data,g=new Uint8Array(160*240);for(let i=0;i<g.length;i++)g[i]=Math.round(.299*rgba[i*4]+.587*rgba[i*4+1]+.114*rgba[i*4+2]);return g;}
  // Compare a stripe from the previous photo against possible positions in the current preview.
  // A match alone cannot prove complete receipt coverage; manual capture remains available.
@@ -864,9 +864,11 @@ window.resetOcrPhotos=()=>{scanImages=[];scanOcrImages=[];window.pendingOcrPhoto
    const v=previousGray[(192+y)*160+x],k=(y*160+x)*4;
    data.data[k]=v;data.data[k+1]=v;data.data[k+2]=v;data.data[k+3]=255;
   }
+  // Render the frozen reference once per capture. The visible overlay is never
+  // repositioned or resized by the recurring quality/alignment checks.
   overlay.width=160;overlay.height=48;
   overlay.getContext('2d').putImageData(data,0,0);
-  overlay.style.top='10%';frame.classList.add('has-overlap');
+  frame.classList.add('has-overlap');
  }
  async function capture(){if(!stream||busy||scanImages.length>=8)return;busy=true;try{const current=grayscale();const shot=document.createElement('canvas');const crop=portraitCrop();shot.width=Math.round(crop.sw);shot.height=Math.round(crop.sh);drawPortrait(shot.getContext('2d'),shot.width,shot.height);const blob=await new Promise(r=>shot.toBlob(r,'image/jpeg',.94));if(!blob)throw Error('Could not capture photo');const file=new File([blob],`receipt-${Date.now()}.jpg`,{type:'image/jpeg'});scanImages.push(await compressReceipt(file));scanOcrImages.push(await compressReceipt(file,4200,.92));renderScanImages();retainCurrentPhotos();previousGray=current;showReference();lastCaptureAt=Date.now();feedback.textContent=`Captured ${scanImages.length} of 8. Move down and align the translucent reference, or tap Finish Receipt.`;stable=0;lastFrame=null;}catch(e){feedback.textContent=e.message;}finally{busy=false;}}
  function inspect(){if(!stream||video.readyState<2||busy)return;const gray=grayscale();let sum=0,sumsq=0,edge=0,change=0;for(let i=0;i<gray.length;i++){const g=gray[i];sum+=g;sumsq+=g*g;if(lastFrame)change+=Math.abs(g-lastFrame[i]);}for(let y=2;y<238;y+=2)for(let x=2;x<158;x+=2){const i=y*160+x;edge+=Math.abs(gray[i]-gray[i-1])+Math.abs(gray[i]-gray[i-160]);}
